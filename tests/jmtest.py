@@ -70,7 +70,9 @@ class JmTestCase(unittest.TestCase):
     daemon = True
 
     def setUp(self):
-        self.home = tempfile.mkdtemp(prefix="jm-test-")
+        # realpath: on macOS the temp dir is under /var, a symlink to /private/var, and os.getcwd() in a
+        # child process reports the resolved path.
+        self.home = os.path.realpath(tempfile.mkdtemp(prefix="jm-test-"))
         self.work = os.path.join(self.home, "work")
         os.makedirs(self.work)
         self.env = dict(os.environ)

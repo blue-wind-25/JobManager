@@ -70,14 +70,16 @@ class TestAdmission(JmTestCase):
         self.assertIn("disk 200 > free 100", self.reason(a))
 
     def test_backfill(self):
-        r = self.submit(spec(sim(2), cpu=1))
+        # The blocker runs until the test cancels it: no race with slow process start-up (Windows).
+        r = self.submit(spec(sim(60), cpu=1))
         self.wait_state(r, "running")
         h = self.submit(spec(sim(0.2), cpu=2, name="head"))
         b = self.submit(spec(sim(0.2), cpu=1, name="small"))
         self.assertEqual(self.wait_ended(b), "done")  # backfilled while the head waits
         self.assertEqual(self.state(h), "waiting")
+        self.jm_ok("cancel", r)
         self.assertEqual(self.wait_ended(h), "done")
-        self.assertLess(self.runs(b)[0][1], self.runs(h)[0][1])
+        self.assertLessEqual(self.runs(b)[0][2], self.runs(h)[0][1])
 
     def test_drain_yes(self):
         r = self.submit(spec(sim(1.5), cpu=1))
