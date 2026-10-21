@@ -15,15 +15,12 @@
 # limitations under the License.
 
 # CI matrix (design/JM_DESIGN.md sec 12.5). The JM_HOME dirs of failed tests are uploaded as an artifact.
-# TEMPORARY: push / pull_request triggers are on while the macOS / Windows fixes are iterated (owner direction,
-# 2026-10-21); back to workflow_dispatch only once the matrix is green (state/IMPL_STATE.md).
+# Manual trigger only (owner direction, 2026-10-21): `gh workflow run ci.yml --ref <branch>`. The whole matrix was
+# green on 2026-10-21 (PR #2, run 39576098266).
 
 name: ci
 
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 jobs:

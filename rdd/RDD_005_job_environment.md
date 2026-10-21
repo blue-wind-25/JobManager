@@ -1,6 +1,7 @@
 # RDD_005 - What a job's environment is made of
 
-Date: 2026-10-21. Status: resolved (implementation; design sec 5 and 16).
+Date: 2026-10-21. Status: resolved (implementation; design sec 5 and 16); **confirmed by the owner, 2026-10-21**
+(both the filtering of the job's environment and the use of the guard's name pattern).
 
 ## Decision
 
