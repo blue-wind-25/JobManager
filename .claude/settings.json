@@ -1,0 +1,40 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/claude-guards/guard.sh secret-echo",
+            "timeout": 10,
+            "statusMessage": "Checking secret exposure"
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/claude-guards/guard.sh broad-search",
+            "timeout": 10,
+            "statusMessage": "Checking search scope"
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/claude-guards/guard.sh protected-read",
+            "timeout": 10,
+            "statusMessage": "Checking protected-file access"
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Grep|Glob|NotebookRead",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/claude-guards/guard.sh protected-read",
+            "timeout": 10,
+            "statusMessage": "Checking protected-file access"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+# protected-read cases (protected_files = _handoff.txt): D = must be denied, A = must pass; TAB-separated.
+# A command line is a Bash call; `@Tool<TAB>path` is a Read / Grep / Glob / Write call on that path.
+D	cat _handoff.txt
+D	less ./notes/_handoff.txt
+D	grep x _handoff.txt
+D	cp _handoff.txt /tmp/x
+D	head -n 5 "_handoff.txt"
+D	python3 -c 'print(open("_handoff.txt").read())'
+D	git diff _handoff.txt
+D	@Read	/home/tester/repo/_handoff.txt
+D	@Grep	_handoff.txt
+D	@Glob	/home/tester/repo/_handoff.txt
+A	echo hi > _handoff.txt
+A	echo hi >> _handoff.txt
+A	printf 'x' | tee -a _handoff.txt
+A	printf 'x' | tee notes/_handoff.txt
+A	rm -f _handoff.txt
+A	git add _handoff.txt
+A	cat handoff.txt
+A	cat my_handoff.txt.bak
+A	@Write	/home/tester/repo/_handoff.txt
+A	@Edit	/home/tester/repo/_handoff.txt
+A	@Read	/home/tester/repo/README.md

@@ -1,0 +1,5 @@
+# A static group: one child per language, two at a time; the group is done when every child is done.
+name        = tagger, all languages
+children    = lang-de.jm
+children    = lang-zh.jm
+parallel    = 2

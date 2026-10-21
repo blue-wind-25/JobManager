@@ -1,0 +1,9 @@
+# A benchmark that runs only after the training job (id: train) succeeded.
+#   jm submit --id train examples/train.jm && jm submit examples/bench.jm
+name        = bench after training
+cwd         = /mnt/data/project
+start       = sh tools/bench.sh out/extractor.bin
+after       = train
+cpu         = 2
+ram         = 1500
+notify      = curl -s -d "$JM_ID $JM_STATE" https://ntfy.sh/my-topic

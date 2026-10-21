@@ -1,0 +1,17 @@
+# A training run: resumable, skipped when its output already exists, one GPU.
+name        = extractor training
+cwd         = /mnt/data/project
+env         = SET=gso_b
+env         = EXTRA_ARGS=--camera-fx 0.5 --best-by top5
+start       = sh tools/train.sh foreground
+resume      = sh tools/train.sh foreground --resume
+done_check  = test -s out/extractor.bin
+progress    = tail -n 1 out/train.log
+stop_grace  = 60
+cpu         = 4
+ram         = 2500
+disk        = 2000 @ /mnt/data
+tokens      = gpu
+retries     = 1
+timeout     = 12h
+artifacts   = out/extractor.bin
