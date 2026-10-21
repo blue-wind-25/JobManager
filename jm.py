@@ -539,7 +539,8 @@ CONFIG_KEYS = [
     ("backfill", "bool", True), ("drain_after", "dur", 1800.0), ("poll", "dur", 5.0),
     ("progress_every", "dur", 60.0), ("keep", "dur", 7 * 86400.0), ("env", "env", None),
     ("secret_names", "list", None), ("not_secret", "list", None), ("secret_prefixes", "list", None),
-    ("on_first_start", "cmd", None), ("on_idle", "cmd", None),
+    ("on_first_start", "cmd", None), ("on_idle", "cmd", None), ("hook_timeout", "dur", 120.0),
+    ("idle_after", "dur", 60.0),
 ]
 LIST_KINDS = ("list", "env", "tokens")
 CMD_KEYS_SPEC = [k for k, kind, _ in SPEC_KEYS if kind == "cmd"]
@@ -700,8 +701,10 @@ DEFAULT_CONFIG = """# jm machine config (design/JM_DESIGN.md sec 6). `key = valu
 # drain_after  = 30m
 # poll         = 5s
 # env          = DATA=/mnt/data   # passed to every job
-# on_first_start = data-rw.sh    # the machine goes from idle to busy
-# on_idle        = data-ro.sh    # the last job ended
+# on_first_start = data-rw.sh    # any command (example name): the machine goes from idle to busy
+# on_idle        = data-ro.sh    # any command (example name): nothing has run for idle_after
+# idle_after     = 60s
+# hook_timeout   = 120s
 """
 
 
@@ -1053,7 +1056,19 @@ def job_env(store, cfg, j, run=None, how=None, extra=None):
 
 
 def job_cwd(store, j):
-    return j.spec["cwd"] or store.home
+    """The job's directory; $NAME in it expands from the config's and the spec's env lines (cwd = $DATA/x)."""
+    cwd = j.spec["cwd"]
+    if not cwd:
+        return store.home
+    if "$" in cwd:
+        try:
+            env = base_env(store.config())
+        except JmError:
+            return cwd
+        for k, v in j.spec["env"]:
+            env[k] = expand_vars(v, env)
+        cwd = expand_vars(cwd, env)
+    return cwd
 
 
 def run_notify(store, cfg, j):
@@ -1075,18 +1090,28 @@ def run_notify(store, cfg, j):
 
 
 def run_global_hook(store, cfg, key):
+    """Run on_first_start / on_idle (outside the state lock). Returns its exit code, 124 on timeout."""
     cmd = cfg[key]
-    if not cmd:
-        return
     env = base_env(cfg)
-    env["JM_HOME"] = store.home
+    env.update({"JM_HOME": store.home, "JM_HOOK": key})
     store.log("%s: %s" % (key, cmd))
+    log = open(store.p("daemon.log"), "ab")
     try:
-        rc = subprocess.call(cmd, shell=True, env=env, cwd=store.home, stdin=subprocess.DEVNULL,
-                             stdout=open(store.p("daemon.log"), "ab"), stderr=subprocess.STDOUT, timeout=600)
+        p = subprocess.Popen(cmd, shell=True, env=env, cwd=store.home, stdin=subprocess.DEVNULL, stdout=log,
+                             stderr=subprocess.STDOUT)
+        try:
+            rc = p.wait(timeout=cfg["hook_timeout"])
+        except subprocess.TimeoutExpired:
+            p.kill()
+            p.wait()
+            rc = 124
         store.log("%s exited %d" % (key, rc))
-    except Exception as e:
+        return rc
+    except OSError as e:
         store.log("%s failed: %s" % (key, e))
+        return 127
+    finally:
+        log.close()
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -1372,9 +1397,8 @@ def fits(ctx, use, j, store):
 
 def start_job(ctx, j, use, daemon):
     store = ctx.store
-    if use.running == 0 and not daemon.busy and ctx.cfg["on_first_start"]:
-        run_global_hook(store, ctx.cfg, "on_first_start")
-    daemon.busy = True
+    if not daemon.busy:
+        daemon.set_machine(store, True)
     run = int(j.info.get("run", "0") or 0) + 1
     how = j.info.get("how") or "start"
     token = secrets.token_hex(8)
@@ -1400,8 +1424,21 @@ def start_job(ctx, j, use, daemon):
 
 
 class DaemonState(object):
-    def __init__(self):
-        self.busy = None
+    """What the daemon remembers between passes. `STATE/machine` ("busy <since>" / "idle <since>") keeps the
+    on_first_start / on_idle state across daemon restarts, and lets scripts outside jm check it."""
+
+    def __init__(self, store):
+        f = read_text(store.p("machine")).split()
+        self.busy = (f[0] == "busy") if f else None
+        self.idle_since = None
+        self.want_hook = None   # a global hook to run after this pass, outside the lock
+        self.hook_error = None  # why on_first_start failed last time (jobs wait and it is retried)
+        self.progress_at = {}
+
+    def set_machine(self, store, busy):
+        self.busy = busy
+        self.idle_since = None
+        write_atomic(store.p("machine"), "%s %s\n" % ("busy" if busy else "idle", utc()))
 
 
 def daemon_pass(store, daemon):
@@ -1453,7 +1490,7 @@ def daemon_pass(store, daemon):
     # 2. Admission: walk the queue top to bottom (design sec 6).
     use = Usage(ctx)
     if daemon.busy is None:
-        daemon.busy = use.running > 0
+        daemon.set_machine(store, use.running > 0)
     head = None
     blocked = None
     for jid in list(ctx.queue):
@@ -1486,6 +1523,11 @@ def daemon_pass(store, daemon):
             ctx.check_parent(j)
             continue
         why = "%s: head %s waits" % (blocked, head.id) if blocked else fits(ctx, use, j, store)
+        if why is None and not daemon.busy and cfg["on_first_start"]:
+            # The machine is idle: run on_first_start (after this pass, outside the lock) before any job starts.
+            daemon.want_hook = "on_first_start"
+            ctx.set_state(j, WAITING, daemon.hook_error or "on_first_start hook runs first")
+            break
         if why is None:
             start_job(ctx, j, use, daemon)
             continue
@@ -1505,11 +1547,33 @@ def daemon_pass(store, daemon):
                 why = "%s; %s" % (why, blocked)
         ctx.set_state(j, WAITING, why)
     ctx.commit()
-    if use.running == 0 and daemon.busy:
-        daemon.busy = False
-        run_global_hook(store, cfg, "on_idle")
+    if use.running == 0 and daemon.busy and not daemon.want_hook:
+        # Idle for idle_after before on_idle, so a chain of jobs does not flip the machine back and forth.
+        daemon.idle_since = daemon.idle_since or now
+        if now - daemon.idle_since >= cfg["idle_after"]:
+            if cfg["on_idle"]:
+                daemon.want_hook = "on_idle"
+            else:
+                daemon.set_machine(store, False)
+    elif use.running:
+        daemon.idle_since = None
     ctx.spawn_notes()
     return ctx
+
+
+def run_wanted_hook(store, cfg, daemon):
+    """Run the hook the last pass asked for. True when the next pass should follow at once."""
+    key, daemon.want_hook = daemon.want_hook, None
+    rc = run_global_hook(store, cfg, key)
+    if key == "on_idle":
+        daemon.set_machine(store, False)
+        return False
+    if rc == 0:
+        daemon.hook_error = None
+        daemon.set_machine(store, True)
+        return True
+    daemon.hook_error = "on_first_start failed (exit %d, see daemon.log); retried every poll" % rc
+    return False
 
 
 def sample_progress(store, cfg, daemon):
@@ -1559,8 +1623,7 @@ def daemon_run(store, quiet=False):
     write_atomic(store.p("daemon.pid"), "%d %s %s\n" % (me, proc_start_time(me) or "?", VERSION))
     remove_file(store.p("daemon.stop"))
     store.log("daemon started, pid %d, jm %s, python %s" % (me, VERSION, sys.version.split()[0]))
-    daemon = DaemonState()
-    daemon.progress_at = {}
+    daemon = DaemonState(store)
     cfg = None
     try:
         while not stop:
@@ -1570,13 +1633,18 @@ def daemon_run(store, quiet=False):
                 store.log("config error (keeping the last good one): %s" % e)
                 if cfg is None:
                     cfg = parse_config("")
+            again = False
             try:
                 with store.lock():
                     daemon_pass(store, daemon)
+                if daemon.want_hook:
+                    again = run_wanted_hook(store, cfg, daemon)
                 sample_progress(store, cfg, daemon)
             except Exception:
                 store.log("pass failed:\n" + traceback.format_exc())
             reap_spawned()
+            if again:
+                continue
             if os.path.exists(store.p("daemon.stop")):
                 break
             last = read_text(store.p("wake"))
@@ -1988,6 +2056,9 @@ def cmd_status(store, a):
     if not a.id:
         out(daemon_status_line(store)[1])
         out("home: %s" % store.home)
+        machine = read_text(store.p("machine")).split()
+        if machine:
+            out("machine: %s since %s" % (machine[0], machine[1] if len(machine) > 1 else "?"))
         out("free: %s" % free_line(store))
         counts = {}
         for jid in store.job_ids():

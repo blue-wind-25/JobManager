@@ -15,8 +15,8 @@
 # limitations under the License.
 
 # CI matrix (design/JM_DESIGN.md sec 12.5). The JM_HOME dirs of failed tests are uploaded as an artifact.
-# Manual trigger only for now (owner direction, 2026-10-21): start it with `gh workflow run ci.yml --ref <branch>`
-# from the owner's PC; push / pull_request triggers come back once the matrix is green (state/IMPL_STATE.md).
+# Manual trigger only (owner direction, 2026-10-21): `gh workflow run ci.yml --ref <branch>`. The whole matrix was
+# green on 2026-10-21 (PR #2, run 39576098266).
 
 name: ci
 
@@ -32,8 +32,8 @@ jobs:
       matrix:
         os: [ubuntu-24.04, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: unittest
@@ -43,7 +43,7 @@ jobs:
         run: python -m unittest discover -v tests
       - name: upload failed JM_HOME dirs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: jm-failed-${{ matrix.os }}
           path: ${{ runner.temp }}/jm-failed
@@ -66,16 +66,17 @@ jobs:
             image: fedora:latest
             setup: dnf install -y -q python3
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: unittest in ${{ matrix.image }}
         run: |
           mkdir -p "$RUNNER_TEMP/jm-failed"
           docker run --rm -v "$PWD:/src:ro" -v "$RUNNER_TEMP/jm-failed:/failed" -e JM_TEST_ARTIFACTS=/failed \
             "${{ matrix.image }}" sh -c '${{ matrix.setup }} && cp -r /src /w && cd /w && \
-            PY=$(command -v python3 || command -v python) && $PY --version && $PY -m unittest discover -v tests'
+            PY=$(command -v python3 || command -v python) && $PY --version && $PY -m unittest discover -v tests; \
+            rc=$?; chmod -R a+rX /failed; exit $rc'
       - name: upload failed JM_HOME dirs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: jm-failed-${{ matrix.name }}
           path: ${{ runner.temp }}/jm-failed
@@ -85,7 +86,7 @@ jobs:
     name: claude-guards
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: cases (python3)
         run: python3 guards/tests/run.py
       - name: cases (python 2.7)

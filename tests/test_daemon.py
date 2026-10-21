@@ -70,14 +70,16 @@ class TestAdmission(JmTestCase):
         self.assertIn("disk 200 > free 100", self.reason(a))
 
     def test_backfill(self):
-        r = self.submit(spec(sim(2), cpu=1))
+        # The blocker runs until the test cancels it: no race with slow process start-up (Windows).
+        r = self.submit(spec(sim(60), cpu=1))
         self.wait_state(r, "running")
         h = self.submit(spec(sim(0.2), cpu=2, name="head"))
         b = self.submit(spec(sim(0.2), cpu=1, name="small"))
         self.assertEqual(self.wait_ended(b), "done")  # backfilled while the head waits
         self.assertEqual(self.state(h), "waiting")
+        self.jm_ok("cancel", r)
         self.assertEqual(self.wait_ended(h), "done")
-        self.assertLess(self.runs(b)[0][1], self.runs(h)[0][1])
+        self.assertLessEqual(self.runs(b)[0][2], self.runs(h)[0][1])
 
     def test_drain_yes(self):
         r = self.submit(spec(sim(1.5), cpu=1))
@@ -162,7 +164,8 @@ class TestLifeCycle(JmTestCase):
         self.wait_state(a, "running")
         self.jm_ok("cancel", a)
         self.assertEqual(self.wait_ended(a), "cancelled")
-        self.assertNotIn(a, self.queue())
+        # `queue` is rewritten at the end of the daemon's transaction, just after `state`: wait for it.
+        self.until(lambda: a not in self.queue(), "cancelled job leaves the queue")
 
     def test_stop_grace_kill(self):
         a = self.submit(spec(sim(30, trap=True), stop_grace="0.5"))
@@ -297,25 +300,20 @@ class TestLifeCycle(JmTestCase):
         self.jm_ok("cont", a)
         self.assertEqual(self.wait_ended(a), "done")
 
-    def test_hooks(self):
-        first = os.path.join(self.work, "first.txt")
-        idle = os.path.join(self.work, "idle.txt")
-        self.jm_ok("config", "on_first_start=%s %s _sim --secs 0 --print-env JM_HOME --out %s" % (q(PY), q(JM), q(first)),
-                   "on_idle=%s %s _sim --secs 0 --print-env JM_HOME --out %s" % (q(PY), q(JM), q(idle)))
-        a = self.submit(spec(sim(0.5)))
-        b = self.submit(spec(sim(0.5)))
-        self.wait_ended(a)
-        self.wait_ended(b)
-        self.until(lambda: os.path.exists(idle), "on_idle ran")
-        self.assertEqual(jm.read_text(first).count("JM_HOME"), 1)
-        self.assertEqual(jm.read_text(idle).count("JM_HOME"), 1)
-
     def test_clean(self):
         a = self.submit(spec(sim(0.1)))
         self.wait_ended(a)
         self.assertEqual(self.jm_ok("clean"), "")
         self.assertIn("removed %s" % a, self.jm_ok("clean", "--older", "0"))
         self.assertEqual(self.jm("status", a)[0], 3)
+
+    def test_cwd_expands_config_env(self):
+        data = os.path.join(self.work, "data")
+        os.makedirs(os.path.join(data, "proj"))
+        self.jm_ok("config", "env=DATA=" + data)
+        a = self.submit(spec(sim(0.1, print_env=["DATA"], out="here.txt"), cwd="$DATA/proj"))
+        self.assertEqual(self.wait_ended(a), "done")
+        self.assertIn("DATA=" + data, jm.read_text(os.path.join(data, "proj", "here.txt")))
 
     def test_artifacts(self):
         path = self.write("out.bin", "x" * 10)
@@ -324,6 +322,50 @@ class TestLifeCycle(JmTestCase):
         lines = self.jm_ok("artifacts", a).split("\t")
         self.assertEqual(lines[0], path)
         self.assertEqual(lines[1], "10")
+
+
+class TestHooks(JmTestCase):
+    """on_first_start / on_idle: run outside the state lock, once per busy period, with JM_HOOK set."""
+
+    def hook(self, out, secs=0, exit=0):
+        return "%s %s _sim --secs %s --exit %d --print-env JM_HOOK --print-env JM_HOME --out %s" % (
+            q(PY), q(JM), secs, exit, q(out))
+
+    def test_once_per_busy_period(self):
+        first = os.path.join(self.work, "first.txt")
+        idle = os.path.join(self.work, "idle.txt")
+        self.jm_ok("config", "on_first_start=" + self.hook(first), "on_idle=" + self.hook(idle), "idle_after=1.5s")
+        a = self.submit(spec(sim(0.5)))
+        b = self.submit(spec(sim(0.5), after=a))  # starts right after a: within idle_after, no flip in between
+        self.wait_ended(a)
+        self.wait_ended(b)
+        self.until(lambda: os.path.exists(idle), "on_idle ran")
+        self.assertEqual(jm.read_text(first).count("JM_HOOK=on_first_start"), 1)
+        self.assertEqual(jm.read_text(idle).count("JM_HOOK=on_idle"), 1)
+        self.until(lambda: jm.read_text(os.path.join(self.home, "machine")).startswith("idle "), "machine idle")
+        self.assertIn("machine: idle since", self.jm_ok("status"))
+
+    def test_cli_not_blocked_by_hook(self):
+        first = os.path.join(self.work, "first.txt")
+        self.jm_ok("config", "on_first_start=" + self.hook(first, secs=3), "idle_after=0")
+        a = self.submit(spec(sim(0.2)))
+        self.until(lambda: "on_first_start" in self.reason(a), "waits for the hook")
+        t0 = time.time()
+        self.jm_ok("list")
+        self.jm_ok("hold", a)
+        self.jm_ok("release", a)
+        self.assertLess(time.time() - t0, 2.5)  # the hook holds no lock
+        self.assertEqual(self.wait_ended(a), "done")
+        self.assertIn("JM_HOOK=on_first_start", jm.read_text(first))
+
+    def test_failing_first_start_is_retried(self):
+        first = os.path.join(self.work, "first.txt")
+        self.jm_ok("config", "on_first_start=" + self.hook(first, exit=3), "idle_after=0")
+        a = self.submit(spec(sim(0.2)))
+        self.until(lambda: "on_first_start failed (exit 3" in self.reason(a), "failure shown")
+        self.assertEqual(self.state(a), "waiting")
+        self.jm_ok("config", "on_first_start=" + self.hook(first))
+        self.assertEqual(self.wait_ended(a), "done")
 
 
 class TestCrashes(JmTestCase):

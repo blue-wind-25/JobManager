@@ -1,13 +1,14 @@
 # RDD_005 - What a job's environment is made of
 
-Date: 2026-10-21. Status: resolved (implementation; design sec 5 and 16).
+Date: 2026-10-21. Status: resolved (implementation; design sec 5 and 16); **confirmed by the owner, 2026-10-21**
+(both the filtering of the job's environment and the use of the guard's name pattern).
 
 ## Decision
 
 A job gets: the daemon's environment **minus every variable whose name is a secret name** (and minus `JM_*`),
 then the config's `env` lines, the spec's `env` lines, `env_pass` names (from the daemon's environment),
 `env_file` contents, and the `JM_*` variables. `env` values expand `$NAME` / `${NAME}` against what is built so far
-(`$$` = `$`). So ordinary variables (PATH, LD_LIBRARY_PATH, CUDA settings) reach jobs as before, while a secret
+(`$$` = `$`); so does `cwd` (e.g. `cwd = $DATA/project` with `DATA` set in the config), added 2026-10-21. So ordinary variables (PATH, LD_LIBRARY_PATH, CUDA settings) reach jobs as before, while a secret
 reaches a job only by name through `env_pass` / `env_file`.
 
 Extra variable: `JM_JM`, the command that runs this jm (`python /path/jm.py`), so a job can submit children

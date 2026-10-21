@@ -13,7 +13,7 @@ Date: 2026-10-21. Status: resolved (implementation; design sec 9).
   `jm requeue ID --spec-edit key=value` does both in one step.
 - `jm move --by-priority` stable-sorts the queue by `priority` (higher first): the only use of `priority`.
 - `jm list` prints no header: one job per line, tab-separated `id state name reason progress`; `--tree` indents
-  children under their parent.
+  children under their parent. **Confirmed by the owner, 2026-10-21.**
 - `jm status` without an id shows the daemon, the free capacity and the job counts; `jm free` (design 12.4) is
   in v1 because it is cheap.
 - `jm wait`: exit 0 for done; for failed / stopped / cancelled the last run's exit code if 1..255, else 1;
@@ -22,5 +22,4 @@ Date: 2026-10-21. Status: resolved (implementation; design sec 9).
 - `#` starts a comment at a line start or after white space (so URL fragments survive); `\#` is a literal `#`.
 - The daemon samples each running job's `progress` command every `progress_every` (config, default 60 s) into
   `jobs/<id>/progress` (last 20 `<UTC> <line>` lines, the v2 format of sec 12.2); `jm list` shows the last line.
-- `on_first_start` / `on_idle` run synchronously in the daemon (600 s limit), so the mount is writable before the
-  first job starts.
+- `on_first_start` / `on_idle`: superseded by RDD_010.

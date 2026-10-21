@@ -7,7 +7,7 @@ Last update: 2026-10-21.
 | Repository skeleton: licence, `design/`, `rdd/`, `state/`, README, CLAUDE.md, CHANGELOG, examples | done | RDD_001 |
 | jm v1 - design/JM_DESIGN.md sec 1-11 | done | RDD_002 .. RDD_008 |
 | jm secrets - sec 16 | done | RDD_005 |
-| jm tests and CI - sec 12.5 | done locally; CI matrix added | see below |
+| jm tests and CI - sec 12.5 | done; full CI matrix green (PR #2) | see below |
 | claude-guards - design/CLAUDE_GUARDS.md sec 2-5, 7 | done (in `guards/`, installed in `.claude/`) | RDD_009 |
 | jm v2 - sec 12.1 estimates / EASY backfill, sec 12.2 progress parsing and ETA | not started | `progress` samples are already stored in the v2 format |
 | jm v3 - sec 12.3 several users, sec 12.4 several machines (`jm free` already exists) | not started | |
@@ -16,11 +16,16 @@ Last update: 2026-10-21.
 
 ## Tested
 
-- `python3 -m unittest discover tests`: 69 tests, all passing on Python 3.13 (this cloud container), Python 3.6.15
-  (`python:3.6-slim`) and Python 3.12 on Alpine / busybox (`python:3.12-alpine`).
-- `guards/tests/run.py`: 167 cases, 0 mismatches on Python 3.13 and Python 2.7 (`python:2.7-slim`);
-  `guards/tests/install_test.sh` passes.
-- Not run locally: macOS, Windows, aarch64, Fedora - covered by CI (`.github/workflows/ci.yml`); see the PR's checks.
+- `python3 -m unittest discover tests`: 73 tests (Python 3.13 and 3.6, 2026-10-21, after the hook changes). CI run 39576098266 (2026-10-21, commit 451f745) is green on
+  every runner: ubuntu-24.04, ubuntu-24.04-arm, macos-latest (arm64), macos-15-intel, windows-latest, and the
+  python:3.6-slim, alpine and fedora containers.
+- `guards/tests/run.py`: 167 cases, 0 mismatches on Python 3 and Python 2.7; `guards/tests/install_test.sh` passes
+  (CI job claude-guards).
+- Fixes needed to get there (PR #2): the test harness resolves its temp dir (macOS `/var` -> `/private/var`),
+  `test_backfill` holds its blocker job until it cancels it (slow process start on Windows),
+  `test_stop_never_resumed` waits for the queue rewrite, container artifacts are made readable by the runner.
+  All were test or workflow issues; jm.py itself needed no change.
+- CI is manual-trigger only: `gh workflow run ci.yml --ref <branch>`.
 
 ## Coverage of the design's test list (sec 12.5, 16)
 
@@ -39,21 +44,19 @@ on_first_start / on_idle hooks; pause / cont; progress sampling and `jm status` 
 - The guards judge the command text only: prose in a shell heredoc that quotes a secret-looking name, or a word
   like `env` between backticks, is refused too. Write such text with the Write / Edit tools (see CLAUDE.md).
 
-## Open decisions for the PC session (owner, 2026-10-22)
+## Decisions
 
-- Group failure modes beyond `continue_on_fail` (the flag and the `--continue-on-fail` submit option exist):
-  should a failing child also be able to stop its running siblings, and which mode is the default?
-- The remaining choices recorded in RDD_002 .. RDD_009 (taken in the cloud session) are to be reviewed then.
-- CI triggers: back to push / pull_request once the matrix is green? (manual only for now)
+All reviewed by the owner on 2026-10-21; none open.
+- Confirmed as built: RDD_005 (job environment minus secret names; the guard's name pattern), RDD_003
+  (`jm restart` only for a running job, to the top of the queue; retries run `resume`, else `start`), RDD_006
+  (`continue_on_fail`: recovery is the group's own business; no "stop running siblings" mode), RDD_007 (`jm list`
+  has no header), RDD_008 (Windows stop).
+- Changed after review: RDD_010 - machine hooks run outside the state lock, `hook_timeout` (120 s), `idle_after`
+  (60 s), `STATE/machine`, `JM_HOOK`; `cwd` expands `$NAME` (RDD_005).
+- CI stays manual-trigger only (owner direction, 2026-10-21).
+- User documentation: docs/GUIDE.md (behaviour), docs/PORTING.md (moving a project's own job scripts to jm).
 
 ## Next
 
-1. Get the CI matrix green (expect Windows / macOS fixes), then tag `v1.0.0`. Owner direction (2026-10-21):
-   the CI iteration (`gh workflow run`, `gh run watch`, `gh run view --log-failed`, fix, repeat; design sec 13.1
-   step 3) is done in a session on the owner's PC, not in the cloud session. The results of the PR #1 runs that
-   started on its creation are the starting point. Run 2 (run id 39530216472, commit 01fc2cc): green on
-   ubuntu-24.04, ubuntu-24.04-arm, python-3.6, alpine, fedora and claude-guards; **failed on macos-latest,
-   macos-15-intel and windows-latest** (unittest step; the failed tests' JM_HOME dirs are uploaded as artifacts
-   `jm-failed-<os>`). Not yet investigated. The workflow is manual-trigger
-   only until then: `gh workflow run ci.yml --ref <branch>`.
+1. Tag `v1.0.0` (CI is green).
 2. Dogfood on the CM5 (design sec 15.2), then v2.
