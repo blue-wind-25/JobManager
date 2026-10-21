@@ -1,0 +1,6 @@
+# A job that submits its own child when its first step is done ($JM_JM runs this jm, $JM_ID is this job).
+name        = train then export
+cwd         = /mnt/data/project
+start       = sh tools/train.sh foreground && $JM_JM submit --parent "$JM_ID" --name export -- sh tools/export.sh
+cpu         = 4
+ram         = 2500

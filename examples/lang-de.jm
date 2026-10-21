@@ -1,0 +1,6 @@
+# Child of languages.jm (paths are relative to the parent spec).
+name        = tagger de
+cwd         = /mnt/data/project
+start       = sh tools/tagger.sh train de
+cpu         = 2
+ram         = 800

@@ -374,7 +374,7 @@ class TestCrashes(JmTestCase):
         b = self.submit(spec(sim(20), on_boot="fail"))
         self.wait_state(a, "running")
         self.wait_state(b, "running")
-        fa, fb = self.jobfile(a, "pid").split(), self.jobfile(b, "pid").split()
+        fb = self.jobfile(b, "pid").split()
         self.until(lambda: os.path.exists(os.path.join(self.home, "jobs", b, "child")), "child b")
         self.kill_wrapper(a)
         hard_kill(fb[0])

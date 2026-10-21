@@ -19,7 +19,6 @@
 
 import os
 import subprocess
-import sys
 import time
 import unittest
 
@@ -190,6 +189,15 @@ class TestProcessIdentity(unittest.TestCase):
         finally:
             p.kill()
             p.wait()
+
+
+class TestExamples(unittest.TestCase):
+    def test_examples_parse(self):
+        d = os.path.join(os.path.dirname(jm.JM_PATH), "examples")
+        names = [n for n in os.listdir(d) if n.endswith(".jm")]
+        self.assertTrue(names)
+        for n in names:
+            jm.parse_spec(jm.read_text(os.path.join(d, n)), n)
 
 
 class TestMisc(unittest.TestCase):
