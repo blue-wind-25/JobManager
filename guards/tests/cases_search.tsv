@@ -1,0 +1,32 @@
+# broad-search cases: D = must be denied, A = must pass; TAB-separated. HOME is /home/tester in the tests.
+D	find / -name foo
+D	find /home -name x
+D	find / -xdev -type f -name '*.jm'
+D	sudo find / -name passwd
+D	grep -r foo /usr
+D	grep -R foo ~
+D	grep -rn needle /
+D	grep --recursive needle /home/
+D	rg password ~/
+D	rg password /home/tester
+D	find $HOME -name x
+D	find "${HOME}" -name x
+D	ag foo /
+D	fd jm /usr
+D	cd / && find . -name x
+D	cd ~ && rg foo
+D	cd /home; grep -r x .
+A	find . -name '*.py'
+A	find /home/tester/proj -name x
+A	find ~/Projects/jm -name '*.py'
+A	grep -r foo src/
+A	grep -rn TODO .
+A	rg foo
+A	rg foo tests/
+A	grep foo /usr/include/stdio.h
+A	ls /
+A	ls -la /home
+A	du -sh /usr
+A	cd /tmp && find . -name x
+A	cd ~/proj && rg foo
+A	git grep -n foo

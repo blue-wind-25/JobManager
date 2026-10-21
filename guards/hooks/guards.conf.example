@@ -1,0 +1,26 @@
+# claude-guards settings: ~/.claude/guards.conf (every repository on this machine) and <repo>/.claude/guards.conf
+# (this repository; read after the user file, so it adds to it). `key = value`; `#` starts a comment; a list key
+# may be repeated.
+
+# secret-echo -------------------------------------------------------------------------------------------------
+# Names matching (^|_)(TOKEN|SECRET|PASSPHRASE|PASSWORD|PASSWD|API_?KEY|PRIVATE_KEY|CREDENTIALS?)(_|$) (any case)
+# are secrets already; list the others here, and the harmless matches under not_secret.
+# secret_names    = MY_SIGNING_PIN
+# not_secret      = JOB_TOKEN_COUNT
+# Value prefixes refused on a command line, on top of ghp_, gho_, ghs_, ghu_, github_pat_, glpat-, sk-ant-, sk-...,
+# xox[abpr]-, AKIA / ASIA, AIza, -----BEGIN ... PRIVATE KEY-----.
+# secret_prefixes = acme_live_
+
+# broad-search ------------------------------------------------------------------------------------------------
+# Search roots refused for find / grep -r / rg / ag / fd / ack. Giving any replaces the default list
+# (/, /home, /usr, ~).
+# search_roots    = /
+# search_roots    = /mnt/data
+
+# protected-read ----------------------------------------------------------------------------------------------
+# Files that may be written but never read (matched by file name).
+# protected_files = _handoff.txt
+
+# both installed ----------------------------------------------------------------------------------------------
+# yes: the repository's copy steps aside when the user-level copy (~/.claude/hooks/claude-guards) exists.
+# skip_if_user_level = no
