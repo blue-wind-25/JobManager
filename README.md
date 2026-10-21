@@ -65,7 +65,7 @@ Every key is described in [design/JM_DESIGN.md](design/JM_DESIGN.md) sec 5 (spec
 | `jm daemon start \| stop \| restart \| status \| run` | background / foreground daemon (stop leaves jobs running) |
 | `jm daemon install systemd \| launchd \| windows` | write a user service file and print how to enable it |
 | `jm daemon bashrc` | a `~/.bashrc` line that starts the daemon if it is not running |
-| `jm submit FILE \| - \| [opts] -- CMD...` | `--name --cpu --ram --disk --tokens --env --dep --set k=v --parent ID --top --after ID --end --hold` |
+| `jm submit FILE \| - \| [opts] -- CMD...` | `--name --cpu --ram --disk --tokens --env --dep --set k=v --parent ID --top --after ID --end --hold --continue-on-fail` |
 | `jm list [--all] [--tree] [--tag T]` | queue order, then recently finished jobs |
 | `jm status [ID]` / `jm free` | one job / the daemon and free capacity |
 | `jm log ID [-f] [-n N] [--raw]` | the log, secrets masked (`--raw` needs a terminal) |
@@ -101,7 +101,7 @@ for them. See design/JM_DESIGN.md sec 16.
 | `design/` | design notes: `JM_DESIGN.md`, `CLAUDE_GUARDS.md` |
 | `rdd/` | resolved design decisions taken while building |
 | `state/` | implementation state: what is built, tested, next |
-| `.github/workflows/ci.yml` | CI: Linux x86_64 / aarch64, macOS, Windows, Python 3.6, Alpine, Fedora, guards on Python 2.7 / 3 |
+| `.github/workflows/ci.yml` | CI (manual trigger for now): Linux x86_64 / aarch64, macOS, Windows, Python 3.6, Alpine, Fedora, guards on Python 2.7 / 3 |
 
 ## Licence
 

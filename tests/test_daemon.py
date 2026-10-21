@@ -433,6 +433,17 @@ class TestGroups(JmTestCase):
         self.assertEqual(self.state(ok2), "done")
         self.assertIn(bad2, self.reason(p2))
 
+    def test_continue_on_fail_flag(self):
+        # The submit flag sets continue_on_fail: the queued sibling still runs after the first child fails.
+        self.write("bad.jm", "start = %s\n" % sim(0.1, exit=2))
+        self.write("ok.jm", "start = %s\n" % sim(0.1))
+        path = self.write("g.jm", "children = bad.jm\nchildren = ok.jm\nparallel = 1\n")
+        p, bad, ok = self.jm_ok("submit", path, "--continue-on-fail").split()
+        self.assertTrue(jm.parse_spec(self.jobfile(p, "spec"))["continue_on_fail"])
+        self.assertEqual(self.wait_ended(p), "failed")
+        self.assertEqual(self.state(bad), "failed")
+        self.assertEqual(self.state(ok), "done")
+
     def test_dynamic_children(self):
         jmcmd = "%JM_JM%" if IS_WIN else "$JM_JM"
         jid = "%JM_ID%" if IS_WIN else '"$JM_ID"'

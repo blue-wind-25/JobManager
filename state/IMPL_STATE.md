@@ -39,10 +39,21 @@ on_first_start / on_idle hooks; pause / cont; progress sampling and `jm status` 
 - The guards judge the command text only: prose in a shell heredoc that quotes a secret-looking name, or a word
   like `env` between backticks, is refused too. Write such text with the Write / Edit tools (see CLAUDE.md).
 
+## Open decisions for the PC session (owner, 2026-10-22)
+
+- Group failure modes beyond `continue_on_fail` (the flag and the `--continue-on-fail` submit option exist):
+  should a failing child also be able to stop its running siblings, and which mode is the default?
+- The remaining choices recorded in RDD_002 .. RDD_009 (taken in the cloud session) are to be reviewed then.
+- CI triggers: back to push / pull_request once the matrix is green? (manual only for now)
+
 ## Next
 
 1. Get the CI matrix green (expect Windows / macOS fixes), then tag `v1.0.0`. Owner direction (2026-10-21):
    the CI iteration (`gh workflow run`, `gh run watch`, `gh run view --log-failed`, fix, repeat; design sec 13.1
    step 3) is done in a session on the owner's PC, not in the cloud session. The results of the PR #1 runs that
-   started on its creation are the starting point.
+   started on its creation are the starting point. Run 2 (run id 39530216472, commit 01fc2cc): green on
+   ubuntu-24.04, ubuntu-24.04-arm, python-3.6, alpine, fedora and claude-guards; **failed on macos-latest,
+   macos-15-intel and windows-latest** (unittest step; the failed tests' JM_HOME dirs are uploaded as artifacts
+   `jm-failed-<os>`). Not yet investigated. The workflow is manual-trigger
+   only until then: `gh workflow run ci.yml --ref <branch>`.
 2. Dogfood on the CM5 (design sec 15.2), then v2.

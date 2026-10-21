@@ -14,15 +14,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# CI matrix (design/JM_DESIGN.md sec 12.5). The repository is public, so every runner is free and the whole matrix
-# runs on every pull request and on pushes to main. The JM_HOME dirs of failed tests are uploaded as an artifact.
+# CI matrix (design/JM_DESIGN.md sec 12.5). The JM_HOME dirs of failed tests are uploaded as an artifact.
+# Manual trigger only for now (owner direction, 2026-10-21): start it with `gh workflow run ci.yml --ref <branch>`
+# from the owner's PC; push / pull_request triggers come back once the matrix is green (state/IMPL_STATE.md).
 
 name: ci
 
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 jobs:

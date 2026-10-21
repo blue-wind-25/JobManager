@@ -11,6 +11,9 @@ Date: 2026-10-21. Status: resolved (implementation; design sec 8).
   cancelled ("sibling X failed"); siblings already running finish; the parent becomes failed once its own command
   and the running children have ended. With `continue_on_fail = yes`, the parent ends when every child has ended,
   failed if any failed. A cancelled child does not fail its parent.
+- The group chooses: `continue_on_fail = yes` in the parent spec, or `jm submit --continue-on-fail` (owner
+  direction, 2026-10-21), keeps the remaining children running and starting after a child fails. Further modes
+  (e.g. also stopping running siblings) are open - see state/IMPL_STATE.md.
 - When a parent fails or is cancelled, its unfinished descendants that are not running are cancelled.
 - Children inherit the parent's `cwd` when they give none. Static children get auto ids unless their spec has `id`.
 - `jm stop / cancel` of a parent with unfinished children asks on a terminal and refuses otherwise (exit 4) unless

@@ -1841,6 +1841,8 @@ def cmd_submit(store, a):
         v = getattr(a, key, None)
         if v is not None:
             assigns.append((key, False, str(v)))
+    if a.continue_on_fail:
+        assigns.append(("continue_on_fail", False, "yes"))
     for v in a.tokens or []:
         assigns.append(("tokens", True, v))
     for v in a.dep or []:
@@ -2677,6 +2679,8 @@ def build_parser():
     s.add_argument("--set", action="append", metavar="KEY=VALUE", help="any spec key (repeatable)")
     s.add_argument("--parent")
     s.add_argument("--hold", action="store_true")
+    s.add_argument("--continue-on-fail", action="store_true",
+                   help="a group: a failing child does not stop its siblings (spec: continue_on_fail = yes)")
     pos = s.add_mutually_exclusive_group()
     pos.add_argument("--top", action="store_true")
     pos.add_argument("--after", dest="after_job", metavar="ID", help="queue it right after job ID")
