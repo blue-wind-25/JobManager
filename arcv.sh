@@ -30,6 +30,10 @@ COPY_NAME=$REPO_NAME-$DATE_STAMP
 
 echo
 
+echo
+git push && git pull && git branch -a && git status
+echo
+
 echo -e "Copying the project tree (excluding the '.git' directory) ..."
 cd "$REPO_DIR/.."
 rsync -av --exclude='.git/' --exclude='__pycache__/' --exclude='*.pyc' "$REPO_NAME/" "$COPY_NAME/"
