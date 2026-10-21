@@ -41,5 +41,8 @@ on_first_start / on_idle hooks; pause / cont; progress sampling and `jm status` 
 
 ## Next
 
-1. Get the CI matrix green (expect Windows / macOS fixes), then tag `v1.0.0`.
+1. Get the CI matrix green (expect Windows / macOS fixes), then tag `v1.0.0`. Owner direction (2026-10-21):
+   the CI iteration (`gh workflow run`, `gh run watch`, `gh run view --log-failed`, fix, repeat; design sec 13.1
+   step 3) is done in a session on the owner's PC, not in the cloud session. The results of the PR #1 runs that
+   started on its creation are the starting point.
 2. Dogfood on the CM5 (design sec 15.2), then v2.
