@@ -108,6 +108,11 @@ idle_after     = 60s                         # default
 hook_timeout   = 120s                        # default; a hook running longer is killed (exit 124)
 ```
 
+**Any command works.** jm has no built-in script names and runs nothing by default: both hooks are empty until
+the config sets them. `data-rw.sh` / `data-ro.sh` are just the names used in these examples; use your own scripts,
+any path, arguments, or a short shell command (`on_idle = sudo mount -o remount,ro /mnt/data`). Each hook is one
+command line run with `sh -c` (`cmd /c` on Windows), from the state dir; for several steps, call a script.
+
 How they run:
 - **Before the first job starts** on an idle machine, the daemon runs `on_first_start` and waits for it; only
   then are jobs started. If it fails (non-zero exit or timeout), no job starts: the waiting jobs show
@@ -121,11 +126,12 @@ How they run:
 - Hooks get the config's `env` lines, `JM_HOME`, and `JM_HOOK` (`on_first_start` or `on_idle`); they do **not**
   get `JM_ID`.
 
-**Jobs that call the hook scripts themselves.** jm cannot stop a job from running `data-ro.sh` in the middle of
-other jobs' work. When adopting jm, make the scripts jm-aware instead, using the variables above:
+**Jobs that call the hook scripts themselves.** jm cannot stop a job from running the read-only script (whatever
+its name) in the middle of other jobs' work. When adopting jm, make the scripts jm-aware instead, using the
+variables above. For a script called `data-ro.sh` (the same lines work at the top of a script of any name):
 
 ```sh
-# data-ro.sh
+# data-ro.sh (or your own read-only script)
 if [ -n "$JM_ID" ]; then                 # called from inside a jm job: the machine is not idle
     echo "data-ro.sh: skipped inside jm job $JM_ID (jm's on_idle hook does it)"; exit 0
 fi
@@ -135,8 +141,10 @@ fi
 # ... remount read-only ...
 ```
 
-`data-rw.sh` called from a job is harmless (the mount is already writable), so it needs no change; removing such
-calls from job scripts is still cleaner (see [PORTING.md](PORTING.md)).
+The writable script (`data-rw.sh` here) called from a job is harmless (the mount is already writable), so it needs
+no change; removing such calls from job scripts is still cleaner (see [PORTING.md](PORTING.md)). The same applies
+to any other pair of "prepare / undo" scripts used as hooks (power a disk up and down, start and stop a service,
+switch a fan profile): the names and what they do are the machine owner's choice.
 
 ## 7. Secrets
 

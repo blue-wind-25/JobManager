@@ -701,8 +701,8 @@ DEFAULT_CONFIG = """# jm machine config (design/JM_DESIGN.md sec 6). `key = valu
 # drain_after  = 30m
 # poll         = 5s
 # env          = DATA=/mnt/data   # passed to every job
-# on_first_start = data-rw.sh    # the machine goes from idle to busy (before the first job starts)
-# on_idle        = data-ro.sh    # nothing has run for idle_after
+# on_first_start = data-rw.sh    # any command (example name): the machine goes from idle to busy
+# on_idle        = data-ro.sh    # any command (example name): nothing has run for idle_after
 # idle_after     = 60s
 # hook_timeout   = 120s
 """

@@ -9,6 +9,9 @@ ended, so a chain of jobs flipped the mount read-only and writable between every
 
 ## Decision
 
+- No built-in script names and no default hooks: `on_first_start` / `on_idle` are empty until the config sets
+  them, and each is any command line. `data-rw.sh` / `data-ro.sh` appear in the docs as examples only (owner,
+  2026-10-21).
 - The daemon runs a hook **after** its pass, with the lock released: CLI commands never wait for a hook. Only the
   daemon waits (its next pass follows at once when `on_first_start` succeeded).
 - `on_first_start` runs before the first job starts on an idle machine. If it fails (non-zero, or killed after

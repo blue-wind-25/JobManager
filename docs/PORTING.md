@@ -20,7 +20,7 @@ can start, stop and start again. This guide is the checklist (the design's versi
 | polling for completion, `tail -f` on a log | `jm wait ID` (exit code = the job's), `jm log -f ID` |
 | a chain script: step 1, then step 2, then step 3 | three specs with `after`, or a group with `children` and `parallel = 1` |
 | "fan out one run per language / dataset" | a static group (`children = ...`, `parallel = N`) or a parent that submits children |
-| remounting a read-only data disk around runs | `on_first_start` / `on_idle` in jm's config ([GUIDE.md](GUIDE.md) sec 6) |
+| remounting a read-only data disk around runs (scripts of any name) | `on_first_start` / `on_idle` in jm's config, set to your scripts ([GUIDE.md](GUIDE.md) sec 6) |
 | notification `curl` at the end of a script | `notify = ...` in the spec (runs on every state change, with `JM_STATE`) |
 | tokens exported in the script or in `~/.bashrc` for the job | `env_pass = NAME` / `env_file = /path` (mode 0600) |
 
@@ -39,9 +39,10 @@ A jm job's `start` command must:
    (`start` / `resume` / `restart`) and `$JM_RUN`. Without `resume`, jm runs `start` again.
 5. **Stop cleanly on TERM** (Unix), or provide a `stop` command (always needed for a clean stop on Windows):
    save a checkpoint and exit. After `stop_grace` (default 60 s) jm kills what is left.
-6. **Not manage the machine**: no remounting, no killing other jobs, no waiting for other jobs, no
-   `data-ro.sh` / `data-rw.sh` calls - see [GUIDE.md](GUIDE.md) sec 6 for making such scripts jm-aware when they
-   cannot be removed at once.
+6. **Not manage the machine**: no remounting, no killing other jobs, no waiting for other jobs, no calls to the
+   machine's prepare / undo scripts (`data-rw.sh` / `data-ro.sh` or whatever they are called there) - jm's hooks
+   run them; see [GUIDE.md](GUIDE.md) sec 6 for making such scripts jm-aware when the calls cannot be removed at
+   once.
 
 ## 3. Write the specs
 
@@ -68,7 +69,7 @@ job receives; the spec then uses `$DATA` (`cwd` and `env` values expand `$NAME`)
 
 ```sh
 jm config cpus=4 ram=4000 ram_reserve=500 tokens=trainer:1 tokens=gpu:1
-jm config on_first_start=/usr/local/bin/data-rw.sh on_idle=/usr/local/bin/data-ro.sh   # if needed
+jm config on_first_start=/usr/local/bin/data-rw.sh on_idle=/usr/local/bin/data-ro.sh   # if needed; your own names
 jm daemon install systemd        # or launchd / windows; or `jm daemon bashrc` for a ~/.bashrc line
 ```
 
