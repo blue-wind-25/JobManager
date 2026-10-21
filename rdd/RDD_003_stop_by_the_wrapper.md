@@ -12,5 +12,10 @@ Date: 2026-10-21. Status: resolved (implementation).
 - The daemon, on seeing the `exit` file, applies `after`. A timeout is the same request with `after = fail`
   (retries apply).
 - Consequence: a stop works with the daemon down; only the final state change waits for the daemon.
-- `restart` puts the job at the top of the queue so it gets its resources back first.
-- Retries after a failure run with `JM_HOW=resume` (the resume command), like a cut-off run.
+- `restart` puts the job at the top of the queue so it gets its resources back first. It is only for a job whose
+  own command is running; in any other state (including `stopping`, and a group whose command has ended) it exits
+  4 and changes nothing - `jm requeue` is for those. **Confirmed by the owner, 2026-10-21.**
+- Retries after a failure run with `JM_HOW=resume` (the resume command), like a cut-off run; a job without a
+  `resume` command runs `start` again (it can still read `JM_HOW` / `JM_RUN`). **Confirmed by the owner,
+  2026-10-21.**
+- Documented for users in docs/GUIDE.md sec 2 and 5.

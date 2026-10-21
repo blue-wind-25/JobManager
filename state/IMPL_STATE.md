@@ -16,7 +16,7 @@ Last update: 2026-10-21.
 
 ## Tested
 
-- `python3 -m unittest discover tests`: 70 tests. CI run 39576098266 (2026-10-21, commit 451f745) is green on
+- `python3 -m unittest discover tests`: 73 tests (Python 3.13 and 3.6, 2026-10-21, after the hook changes). CI run 39576098266 (2026-10-21, commit 451f745) is green on
   every runner: ubuntu-24.04, ubuntu-24.04-arm, macos-latest (arm64), macos-15-intel, windows-latest, and the
   python:3.6-slim, alpine and fedora containers.
 - `guards/tests/run.py`: 167 cases, 0 mismatches on Python 3 and Python 2.7; `guards/tests/install_test.sh` passes
@@ -46,15 +46,15 @@ on_first_start / on_idle hooks; pause / cont; progress sampling and `jm status` 
 
 ## Decisions
 
-Confirmed by the owner (2026-10-21): RDD_005 (job environment minus secret names; the guard's name pattern).
-CI stays manual-trigger only (owner direction, 2026-10-21).
-
-Open:
-- Group failure modes beyond `continue_on_fail` (the key and `jm submit --continue-on-fail` exist): should a
-  failing child also be able to stop its running siblings, and which mode is the default? (RDD_006)
-- Smaller choices with working defaults, for review: `jm restart` moves the job to the top of the queue, retries
-  run the `resume` command (RDD_003); Windows stops kill at once when the gentle taskkill is refused (RDD_008);
-  `on_first_start` / `on_idle` run synchronously, up to 600 s, `jm list` prints no header (RDD_007).
+All reviewed by the owner on 2026-10-21; none open.
+- Confirmed as built: RDD_005 (job environment minus secret names; the guard's name pattern), RDD_003
+  (`jm restart` only for a running job, to the top of the queue; retries run `resume`, else `start`), RDD_006
+  (`continue_on_fail`: recovery is the group's own business; no "stop running siblings" mode), RDD_007 (`jm list`
+  has no header), RDD_008 (Windows stop).
+- Changed after review: RDD_010 - machine hooks run outside the state lock, `hook_timeout` (120 s), `idle_after`
+  (60 s), `STATE/machine`, `JM_HOOK`; `cwd` expands `$NAME` (RDD_005).
+- CI stays manual-trigger only (owner direction, 2026-10-21).
+- User documentation: docs/GUIDE.md (behaviour), docs/PORTING.md (moving a project's own job scripts to jm).
 
 ## Next
 

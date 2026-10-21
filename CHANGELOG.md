@@ -8,4 +8,7 @@
   Task Scheduler service files, secret refusal / `env_pass` / `env_file` / log masking, `jm free`.
 - claude-guards (design/CLAUDE_GUARDS.md) in `guards/`: secret-echo, broad-search and protected-read hooks, case
   tests on Python 2.7 / 3, `install.sh --user | --repo`; installed into this repository's `.claude/`.
-- CI matrix: Linux x86_64 / aarch64, macOS arm64 / x86_64, Windows, Python 3.6, Alpine, Fedora.
+- CI matrix: Linux x86_64 / aarch64, macOS arm64 / x86_64, Windows, Python 3.6, Alpine, Fedora (manual trigger).
+- Machine hooks run outside the state lock; new config keys `hook_timeout` (120 s) and `idle_after` (60 s);
+  `STATE/machine` records busy / idle; hooks get `JM_HOOK`. `cwd` expands `$NAME`. `jm submit --continue-on-fail`.
+- docs/GUIDE.md (behaviour reference) and docs/PORTING.md (moving a project's job scripts to jm).
