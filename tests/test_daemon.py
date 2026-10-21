@@ -164,7 +164,8 @@ class TestLifeCycle(JmTestCase):
         self.wait_state(a, "running")
         self.jm_ok("cancel", a)
         self.assertEqual(self.wait_ended(a), "cancelled")
-        self.assertNotIn(a, self.queue())
+        # `queue` is rewritten at the end of the daemon's transaction, just after `state`: wait for it.
+        self.until(lambda: a not in self.queue(), "cancelled job leaves the queue")
 
     def test_stop_grace_kill(self):
         a = self.submit(spec(sim(30, trap=True), stop_grace="0.5"))

@@ -75,7 +75,8 @@ jobs:
           mkdir -p "$RUNNER_TEMP/jm-failed"
           docker run --rm -v "$PWD:/src:ro" -v "$RUNNER_TEMP/jm-failed:/failed" -e JM_TEST_ARTIFACTS=/failed \
             "${{ matrix.image }}" sh -c '${{ matrix.setup }} && cp -r /src /w && cd /w && \
-            PY=$(command -v python3 || command -v python) && $PY --version && $PY -m unittest discover -v tests'
+            PY=$(command -v python3 || command -v python) && $PY --version && $PY -m unittest discover -v tests; \
+            rc=$?; chmod -R a+rX /failed; exit $rc'
       - name: upload failed JM_HOME dirs
         if: failure()
         uses: actions/upload-artifact@v6
