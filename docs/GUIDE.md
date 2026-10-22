@@ -259,6 +259,21 @@ applog = journalctl --user -u my-render -n ${JM_LINES:-100} ${JM_FOLLOW:+-f} --n
 - Exit code 1 when a command exited non-zero or could not start (it is named on stderr), or when no job shown
   has an `applog`.
 
+**The job's own status: `report`** (RDD_015). Where `applog` prints a log, `report` prints a summary the job's
+own tools compute: a training run's per-language table, the last epochs, how far a render is. Any command:
+
+```
+report = sh tools/status.sh train ${JM_LINES:-8}      # e.g. the run's table and its last N epochs
+```
+
+- `jm report ID [-n N]` runs it for one job; `jm report [-n N]` for every job in the queue (queued, waiting,
+  running, held, stopped) that has one, in queue order, a `==> ID <==` section each. `-n` reaches the command as
+  `JM_LINES` (empty without `-n`); what it means is the command's choice. There is no `-f`: a report is a snapshot.
+- Same rules as `applog`: run by the CLI only, in the job's `cwd`, with the `env` lines and `JM_*` variables but no
+  `env_pass` / `env_file` secrets, output masked; exit code 1 when a command exited non-zero (named on stderr).
+- On a worker, `jr [ID] [N]` (examples/jm-shortcuts.sh): `jr` every job, `jr 100` every job with N = 100,
+  `jr ID 100` one job.
+
 ## 9. Starting the daemon at boot
 
 Jobs survive a reboot only as far as the daemon comes back: a cut-off job is resumed (`on_boot = resume`) when the

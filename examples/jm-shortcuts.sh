@@ -23,6 +23,7 @@
 #   jf [ID]     follow the captured output (log -f), the children's too; ends when the jobs end, or Ctrl-C
 #   ja [ID]     follow the job's own log (applog -f), the children's too
 #   jt [ID] [N] the last N (default 30) lines of the captured output, the children's too
+#   jr [ID] [N] the job's `report` (its own status summary; N reaches it as JM_LINES); no ID: every queued job's
 #
 # Without an ID they take the first running job at the top level of the queue (a group: the whole group).
 
@@ -41,3 +42,10 @@ js() { _jm_i=$(_jm_id "$1") && jm status "$_jm_i"; }
 jf() { _jm_i=$(_jm_id "$1") && jm log -f --children "$_jm_i"; }
 ja() { _jm_i=$(_jm_id "$1") && jm applog -f --children "$_jm_i"; }
 jt() { _jm_i=$(_jm_id "$1") && jm log -n "${2:-30}" --children "$_jm_i"; }
+jr() {
+    case "${1:-}" in
+        '') jm report ;;
+        *[!0-9]*) jm report "$1" ${2:+-n "$2"} ;;
+        *) jm report -n "$1" ;;  # a number alone: every job, N lines
+    esac
+}

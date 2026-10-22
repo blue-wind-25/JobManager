@@ -22,7 +22,7 @@ import subprocess
 import sys
 import unittest
 
-from jmtest import JmTestCase, jm, sim, IS_WIN
+from jmtest import JmTestCase, jm, sim, q, PY, JM, IS_WIN
 
 
 class TestQueueOps(JmTestCase):
@@ -206,6 +206,15 @@ class TestShortcuts(JmTestCase):
         out, err = p.communicate(timeout=60)
         self.assertEqual(out.splitlines(), ["%s\theld\t" % a, "rc=1", "id: %s" % a])
         self.assertIn("no running job", err)
+        # jr: a job's report (RDD_015); no ID = every queued job's; a number alone = every job, N lines
+        show = "%s %s _sim --secs 0 --print-env JM_LINES" % (q(PY), q(JM))
+        r = self.submit("report = %s\nstart = %s\n" % (show, sim(0.1)), "--hold")
+        p = subprocess.Popen(["sh", "-c", '. "$1"; jr; jr %s 5; jr 4' % r, "sh", shortcuts],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
+                             env=dict(self.env, PATH=bindir + os.pathsep + self.env["PATH"]))
+        out, err = p.communicate(timeout=60)
+        self.assertEqual([x for x in out.splitlines() if x.startswith(("==>", "env"))],
+                         ["==> %s <==" % r, "env JM_LINES=", "env JM_LINES=5", "==> %s <==" % r, "env JM_LINES=4"])
 
 
 class TestSecretsSubmit(JmTestCase):

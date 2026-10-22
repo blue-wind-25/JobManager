@@ -1,7 +1,11 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 - 2026-10-23
 
+- Spec key `report` and `jm report [ID] [-n N]` (RDD_015): a command that prints the job's own status summary (a
+  run's table, its last epochs), for one job or every queued one in queue order, a `==> ID <==` section each;
+  `-n` reaches it as `JM_LINES`; the environment, secret rules and masking of `applog`. `jm status` shows it.
+  Phone shortcut `jr [ID] [N]` in examples/jm-shortcuts.sh.
 - docs/GUIDE.md sec 9: starting the daemon at boot (service file vs cron vs ~/.bashrc), with the read-only-root
   steps (remount, the linger flag when logind cannot write, a busy root on Raspberry Pi OS).
 

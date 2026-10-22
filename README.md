@@ -19,7 +19,7 @@ There is no network port and no web UI: remote use is `ssh -t host jm ...`, with
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/blue-wind-25/JobManager/v1.1.0/jm.py -o ~/bin/jm && chmod +x ~/bin/jm
+curl -fsSL https://raw.githubusercontent.com/blue-wind-25/JobManager/v1.2.0/jm.py -o ~/bin/jm && chmod +x ~/bin/jm
 jm daemon start                 # or: jm daemon install systemd | launchd | windows
 ```
 
@@ -81,6 +81,7 @@ Every key is described in [design/JM_DESIGN.md](design/JM_DESIGN.md) sec 5 (spec
 | `jm status [ID]` / `jm free` | one job / the daemon and free capacity |
 | `jm log ID [-f] [-n N] [--children] [--stdout\|--stderr] [--raw]` | captured stdout + stderr, secrets masked (`--raw` needs a terminal); `--children` adds the children's, one section each |
 | `jm applog ID [-f] [-n N] [--children] [--raw]` | runs the spec's `applog` command: the log the job keeps itself |
+| `jm report [ID] [-n N] [--raw]` | runs the spec's `report` command: the job's own status summary (no ID: every queued job's, one section each; `-n` = `JM_LINES`) |
 | `jm wait ID [--timeout T]` | block until it ends |
 | `jm move ID --top\|--bottom\|--up N\|--down N\|--before ID2\|--after ID2`, `jm move --by-priority`, `jm swap A B` | reorder |
 | `jm hold ID` / `jm release ID` | park / unpark |

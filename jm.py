@@ -42,7 +42,7 @@ import threading
 import time
 import traceback
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 IS_WIN = os.name == "nt"
 IS_LINUX = sys.platform.startswith("linux")
 JM_PATH = os.path.abspath(__file__)
@@ -618,7 +618,7 @@ SPEC_KEYS = [
     ("id", "str", None), ("name", "str", None), ("cwd", "str", None), ("note", "str", None),
     ("env", "env", None), ("env_pass", "list", None), ("env_file", "list", None),
     ("start", "cmd", None), ("resume", "cmd", None), ("stop", "cmd", None), ("stop_grace", "dur", 60.0),
-    ("done_check", "cmd", None), ("progress", "cmd", None), ("applog", "cmd", None), ("split_stderr", "bool", False),
+    ("done_check", "cmd", None), ("progress", "cmd", None), ("applog", "cmd", None), ("report", "cmd", None), ("split_stderr", "bool", False),
     ("pre", "cmd", None), ("post", "cmd", None), ("notify", "cmd", None),
     ("cpu", "num", 1.0), ("ram", "num", 0.0), ("disk", "disk", None), ("tokens", "tokens", None),
     ("after", "list", None), ("after_ok", "bool", True), ("priority", "int", 0), ("retries", "int", 0),
@@ -2285,6 +2285,8 @@ def cmd_status(store, a):
         out("resume: %s" % mask_secrets(s["resume"], ctx.cfg))
     if s["applog"]:
         out("applog: %s" % mask_secrets(s["applog"], ctx.cfg))
+    if s["report"]:
+        out("report: %s" % mask_secrets(s["report"], ctx.cfg))
     env_bits = []
     if s["env"]:
         env_bits.append("env " + " ".join(k for k, _ in s["env"]))
@@ -2473,7 +2475,8 @@ def applog_env(store, cfg, j, a):
     return env
 
 
-def applog_start(store, cfg, j, a):
+def applog_start(store, cfg, j, a, cmd=None):
+    """Start the job's `applog` (or `cmd`: its `report`) command, with applog_env and stdout piped."""
     cwd = job_cwd(store, j)
     if not os.path.isdir(cwd):
         raise JmError("cwd %s does not exist" % cwd)
@@ -2484,7 +2487,46 @@ def applog_start(store, cfg, j, a):
         kw["creationflags"] = CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
     else:
         kw["start_new_session"] = True
-    return subprocess.Popen(j.spec["applog"], **kw)
+    return subprocess.Popen(cmd or j.spec["applog"], **kw)
+
+
+def cmd_report(store, a):
+    """`jm report [ID] [-n N]` (RDD_015): run the spec's `report` command - a status summary printed by the job's
+    own tools, e.g. a training run's per-language table - for one job, or for every job in the queue that has one,
+    in queue order, a `==> ID <==` section each. Same environment and masking as `applog`; -n is JM_LINES."""
+    store.init()
+    ctx = Ctx(store)
+    if a.id:
+        jobs = [ctx.need(a.id)]
+        if not jobs[0].spec["report"]:
+            raise JmError("%s: no `report` command in the spec (report = a command that prints the job's own status)"
+                          % a.id)
+    else:
+        jobs = [k for k in (ctx.job(jid) for jid in store.read_queue()) if k is not None and k.spec["report"]]
+        if not jobs:
+            out("no job in the queue has a `report` command")
+            return EXIT_OK
+    show = log_show(a, ctx.cfg)
+    sec = Sections(not a.id, show)
+    a.follow = False
+    bad = []
+    for k in jobs:
+        try:
+            p = applog_start(store, ctx.cfg, k, a, k.spec["report"])
+        except (JmError, OSError) as e:
+            warn("report of %s: %s" % (k.id, e))
+            bad.append(k.id)
+            continue
+        try:
+            sec.write(k.id, "".join(applog_lines(p)))
+            rc = p.wait()
+        finally:
+            if p.poll() is None:
+                kill_group(p.pid, hard=True)
+        if rc:
+            warn("report of %s exited %d" % (k.id, rc))
+            bad.append(k.id)
+    return EXIT_ERR if bad else EXIT_OK
 
 
 def applog_lines(p):
@@ -3186,6 +3228,11 @@ def build_parser():
     g.add_argument("--stdout", action="store_true", help="stdout only (without split_stderr the log holds both)")
     g.add_argument("--stderr", action="store_true", help="stderr only (needs split_stderr = yes in the spec)")
 
+    rp = sub.add_parser("report", help="run the job's `report` command (a status summary); no ID: every queued job's")
+    rp.add_argument("id", nargs="?")
+    rp.add_argument("-n", "--lines", type=int, help="passed to the command as JM_LINES")
+    rp.add_argument("--raw", action="store_true", help="unmasked (terminal only)")
+
     w = sub.add_parser("wait", help="block until the job ends; exit code = the job's")
     w.add_argument("id")
     w.add_argument("--timeout")
@@ -3253,6 +3300,7 @@ def build_parser():
 COMMANDS = {
     "submit": cmd_submit, "list": cmd_list, "status": cmd_status, "free": cmd_free, "log": cmd_log,
     "applog": cmd_applog,
+    "report": cmd_report,
     "wait": cmd_wait, "move": cmd_move, "swap": cmd_swap, "hold": cmd_hold, "release": cmd_release,
     "stop": cmd_stop, "cancel": cmd_cancel, "restart": cmd_restart, "requeue": cmd_requeue, "set": cmd_set,
     "edit": cmd_edit, "config": cmd_config, "clean": cmd_clean, "artifacts": cmd_artifacts,

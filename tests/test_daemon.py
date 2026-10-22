@@ -682,6 +682,34 @@ class TestApplog(JmTestCase):
         self.assertEqual(self.state(a), "done")
 
 
+class TestReport(JmTestCase):
+    """RDD_015: `jm report [ID] [-n N]` runs the spec's `report` command, for one job or every queued one."""
+    daemon = False
+
+    def test_report(self):
+        self.env["MY_API_TOKEN"] = "s3cr3t-value"
+        show = "%s %s _sim --secs 0 --print-env JM_ID --print-env JM_LINES --print-env MY_API_TOKEN" % (q(PY), q(JM))
+        a = self.submit(spec(sim(0.1), report=show, env_pass="MY_API_TOKEN"), "--hold")
+        plain = self.submit(spec(sim(0.1)), "--hold")
+        b = self.submit(spec(sim(0.1), report=show), "--hold")
+        out = self.jm_ok("report", a, "-n", "7")
+        self.assertIn("env JM_ID=%s" % a, out)
+        self.assertIn("env JM_LINES=7", out)
+        self.assertIn("env MY_API_TOKEN=<unset>", out)  # like applog: never a secret
+        self.assertNotIn("==> ", out)
+        self.assertIn("report: ", self.jm_ok("status", a))
+        out = self.jm_ok("report")  # every queued job with a report, in queue order
+        self.assertEqual([x for x in out.splitlines() if x.startswith("==> ")], ["==> %s <==" % a, "==> %s <==" % b])
+        self.assertNotIn(plain, out)
+        rc, _, err = self.jm("report", plain)
+        self.assertEqual(rc, 1)
+        self.assertIn("no `report`", err)
+        bad = self.submit(spec(sim(0.1), report="%s %s _sim --secs 0 --exit 3" % (q(PY), q(JM))), "--hold")
+        rc, _, err = self.jm("report", bad)
+        self.assertEqual(rc, 1)
+        self.assertIn("report of %s exited 3" % bad, err)
+
+
 class TestSecretsRun(JmTestCase):
     daemon = False
 

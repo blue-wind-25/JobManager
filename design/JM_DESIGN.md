@@ -103,6 +103,7 @@ stop_grace  = 60                         # seconds
 done_check  = test -s $RUN_DIR/extractor.bin      # exit 0 = already done: skip / mark done, do not run
 progress    = grep 'epoch [0-9]*:' run.log | tail -n 1   # one line shown by `jm status`
 applog      = tail -n ${JM_LINES:-200} ${JM_FOLLOW:+-f} run.log   # the job's own log, for `jm applog`
+report      = sh tools/status.sh ${JM_LINES:-8}   # the job's own status summary, for `jm report` (RDD_015)
 split_stderr = no                        # yes: stderr into jobs/<id>/stderr, not into the log (RDD_011)
 
 cpu         = 4                          # cores (float allowed)
@@ -127,8 +128,9 @@ note        = restart from epoch 7, RDD_640
 
 Variables available to every command: `JM_ID`, `JM_NAME`, `JM_HOME`, `JM_RUN` (run number), `JM_HOW`
 (start | resume | restart), `JM_PARENT` (parent id or empty), `JM_EXIT` (in `post` / `notify`), `JM_STATE`
-(in `notify` and `applog`), `JM_LINES` / `JM_FOLLOW` (in `applog`: `-n` and `-f` of `jm applog`), plus the spec's
-`env` lines. `applog` runs in the CLI and gets no `env_pass` / `env_file` secrets (RDD_011).
+(in `notify`, `applog` and `report`), `JM_LINES` / `JM_FOLLOW` (in `applog`: `-n` and `-f` of `jm applog`; in
+`report`: `-n` of `jm report`), plus the spec's `env` lines. `applog` and `report` run in the CLI and get no
+`env_pass` / `env_file` secrets (RDD_011, RDD_015).
 
 **What else is worth carrying** (proposed, all optional): `gpu` as a token (`tokens = gpu`), `nice` (default 5),
 `log_max` (cap the log at N MB: default the config's `log_max`, 100; RDD_013), `keep` (how long a finished job stays in `jm list`, default 7d),
@@ -223,6 +225,7 @@ jm log ID [-f] [-n N] [--children] [--stdout | --stderr]
                                                the job's captured output (follow like tail -f); --children
                                                adds its children's, one `==> ID <==` section each (RDD_011)
 jm applog ID [-f] [-n N] [--children]          run the spec's `applog`: the log the job keeps itself
+jm report [ID] [-n N]                          run the spec's `report` (a status summary); no ID: every queued job's
 jm wait ID [--timeout T]                       block until the job ends; exit code = the job's
 
 jm move ID --top | --bottom | --up [N] | --down [N] | --before ID2 | --after ID2

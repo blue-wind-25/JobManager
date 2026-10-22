@@ -86,6 +86,7 @@ commands are the local ones; the work is in keeping them short to type. Set up t
    | `jf [ID]` | `jm log -f --children ID` | follow what the job prints; ends when the job ends |
    | `ja [ID]` | `jm applog -f --children ID` | follow the job's own log (`applog`) |
    | `jt [ID] [N]` | `jm log -n N --children ID` | the last N (30) lines, without following |
+   | `jr [ID] [N]` | `jm report [ID] [-n N]` | the job's own status summary (`report`); no ID: every queued job's; `jr N`: all, N lines |
 
    Everything else is the plain command (`jm stop j0007`, `jm list` for the full rows with names and reasons).
    Short ids help too: `jm submit --id t5 ...` instead of the automatic `j0007`.
