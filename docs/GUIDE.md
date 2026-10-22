@@ -53,6 +53,8 @@ group whose own command has ended) it fails with exit code 4 and changes nothing
 
 - `retries = N`: after a failure the job goes back to the queue (same place) up to N times, as a `resume` run.
 - `timeout = 12h`: a run that takes longer is stopped and counts as a failure (retries apply).
+- Running time is measured on the monotonic clock (on Linux also across a daemon restart), so the date being set
+  after boot - NTP on a Pi without RTC battery - neither fires a `timeout` nor the drain guard early (RDD_013).
 - `jm hold` on a running job: the job is held instead of retried if it fails.
 
 ## 4. Groups and their children
@@ -189,6 +191,12 @@ a job without `split_stderr`, `--stdout` warns that the log holds both, and `--s
 with a warning (`--children`). Splitting loses the order between the two streams, so leave it off unless the
 stderr is wanted on its own (a job that prints its progress to stdout and only errors to stderr). `notify` output
 always goes to `log`.
+
+**Size.** Every log is capped at `log_max` MB: the config's `log_max` (default 100) or the spec's, `0` for no
+limit. Over the cap the older part moves to `log.1` (`stderr.1`, `daemon.log.1`; one older part is kept) - between
+runs, and on Linux / macOS also while the job runs: the wrapper checks every second, copies the log to `log.1`,
+empties it and writes a `==== ... over log_max ...` line; the job writes on undisturbed. On Windows logs rotate
+only between runs and at daemon start. `jm log` shows the current file; `cat jobs/<id>/log.1` the part before.
 
 **The job's own log: `applog`.** Any command that prints the log to stdout:
 

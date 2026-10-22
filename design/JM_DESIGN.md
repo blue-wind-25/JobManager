@@ -77,6 +77,7 @@ STATE/
     events            append-only "<UTC time> <event>" lines (submitted, moved, held, started, ...)
     log               the job's stdout + stderr, appended; a banner line on every (re)start
     stderr            only with `split_stderr = yes`: the stderr, which then is not in `log` (RDD_011)
+    log.1, stderr.1   the older part once a log passed `log_max` (RDD_013)
 ```
 
 Everything is readable with `cat`, `tail -f` and `grep`. Hand edits are allowed while the daemon is stopped.
@@ -130,7 +131,7 @@ Variables available to every command: `JM_ID`, `JM_NAME`, `JM_HOME`, `JM_RUN` (r
 `env` lines. `applog` runs in the CLI and gets no `env_pass` / `env_file` secrets (RDD_011).
 
 **What else is worth carrying** (proposed, all optional): `gpu` as a token (`tokens = gpu`), `nice` (default 5),
-`log_max` (rotate the log past N MB), `keep` (how long a finished job stays in `jm list`, default 7d),
+`log_max` (cap the log at N MB: default the config's `log_max`, 100; RDD_013), `keep` (how long a finished job stays in `jm list`, default 7d),
 `estimate` (expected duration; only shown, and usable later by a smarter backfill), `tags` (filter in `list`).
 
 Submitting: `jm submit FILE`, `jm submit -` (spec on stdin, handy over ssh), or inline:
@@ -150,6 +151,7 @@ tokens       = bench_jvm:2
 backfill     = yes         # default yes [decided: default on, with the drain guard below]
 drain_after  = 30m         # head job waiting longer than this -> stop backfilling until it starts
 poll         = 5s
+log_max      = 100         # MB per job log and daemon.log; the older part goes to *.1; 0 = no limit (RDD_013)
 ```
 
 Admission, each poll (and on every `wake`):

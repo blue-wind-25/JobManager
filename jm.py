@@ -84,6 +84,47 @@ def parse_utc(s):
         return None
 
 
+_BOOT_ID = []
+
+
+def boot_id():
+    """Identifies this boot (Linux), so a time.monotonic() value kept in a file can be compared after a daemon
+    restart; None elsewhere (there durations stored in files fall back to the wall clock)."""
+    if not _BOOT_ID:
+        _BOOT_ID.append((read_text("/proc/sys/kernel/random/boot_id").strip() or None) if IS_LINUX else None)
+    return _BOOT_ID[0]
+
+
+def stamp_now(info, key):
+    """Record "now" in `info` as UTC text (for people and other boots) and, on Linux, as a monotonic stamp."""
+    info[key] = utc()
+    b = boot_id()
+    if b:
+        info[key + "_mono"] = "%s %.3f" % (b, time.monotonic())
+    else:
+        info.pop(key + "_mono", None)
+
+
+def elapsed(info, key):
+    """Seconds since the moment stamp_now() recorded, or None. The monotonic clock when the stamp is from this
+    boot: a wall-clock jump (NTP setting the date on a Pi that booted without RTC) must not fire a timeout or
+    the drain guard. Else the wall clock."""
+    f = info.get(key + "_mono", "").split()
+    if len(f) == 2 and f[0] == boot_id():
+        try:
+            return max(0.0, time.monotonic() - float(f[1]))
+        except ValueError:
+            pass
+    t0 = parse_utc(info.get(key, ""))
+    return None if t0 is None else max(0.0, time.time() - t0)
+
+
+def pop_stamp(info, key):
+    had = info.pop(key, None) is not None
+    info.pop(key + "_mono", None)
+    return had
+
+
 DUR_UNITS = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
 DUR_RE = re.compile(r"^(?:\s*\d+(?:\.\d+)?\s*[smhdw]?\s*)+$")
 
@@ -142,6 +183,37 @@ def append_line(path, line):
         f.write(line.rstrip("\n") + "\n")
 
 
+def rotate_log(path, max_mb):
+    """Between runs (nothing writes it): over `max_mb`, the log becomes PATH.1 and a new one starts."""
+    try:
+        if max_mb and os.path.getsize(path) > max_mb * 1048576:
+            os.replace(path, path + ".1")
+    except OSError:
+        pass
+
+
+def trim_log(path, max_mb):
+    """While a log is written: over `max_mb`, copy it to PATH.1 and empty it. Its writers append (O_APPEND), so
+    they go on at the new end; at most the lines written in between are lost. True when trimmed. Not on Windows,
+    where a writer's own file position would leave a gap of NULs: logs rotate between runs only there."""
+    if not max_mb or IS_WIN:
+        return False
+    try:
+        if os.path.getsize(path) <= max_mb * 1048576:
+            return False
+        shutil.copyfile(path, path + ".1")
+        with open(path, "r+b") as f:
+            f.seek(os.path.getsize(path + ".1"))
+            rest = f.read()  # written while it was copied
+            f.truncate(0)
+        if rest:
+            with open(path + ".1", "ab") as f:
+                f.write(rest)
+        return True
+    except (IOError, OSError):
+        return False
+
+
 def remove_file(path):
     try:
         os.remove(path)
@@ -190,7 +262,7 @@ class FileLock(object):
 
     def acquire(self, blocking=True, timeout=None):
         fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
-        deadline = None if timeout is None else time.time() + timeout
+        deadline = None if timeout is None else time.monotonic() + timeout
         while True:
             try:
                 if IS_WIN:
@@ -201,7 +273,7 @@ class FileLock(object):
                 self.fd = fd
                 return True
             except (IOError, OSError):
-                if not blocking or (deadline is not None and time.time() >= deadline):
+                if not blocking or (deadline is not None and time.monotonic() >= deadline):
                     os.close(fd)
                     return False
                 time.sleep(0.05)
@@ -319,12 +391,12 @@ def proc_alive(pid, start, token=None):
         # Between fork and exec a Unix child still shows its parent's command line (the daemon writes a wrapper's
         # pid file right after the fork), so a miss is final only once it has held for a second. A Windows
         # process starts with its own command line.
-        deadline = time.time() + (0 if IS_WIN else 1.0)
+        deadline = time.monotonic() + (0 if IS_WIN else 1.0)
         while True:
             cmd = proc_cmdline(pid)
             if cmd is None:
                 return False
-            if token in cmd or time.time() >= deadline:
+            if token in cmd or time.monotonic() >= deadline:
                 break
             time.sleep(0.05)
         _CMDLINE_OK[key] = token in cmd
@@ -543,7 +615,7 @@ SPEC_KEYS = [
     ("after", "list", None), ("after_ok", "bool", True), ("priority", "int", 0), ("retries", "int", 0),
     ("timeout", "dur", None), ("on_boot", "enum:resume|hold|fail", "resume"), ("drain", "bool", False),
     ("children", "list", None), ("parallel", "int", 0), ("continue_on_fail", "bool", False),
-    ("artifacts", "list", None), ("nice", "int", 5), ("log_max", "num", 0.0), ("keep", "dur", None),
+    ("artifacts", "list", None), ("nice", "int", 5), ("log_max", "num", None), ("keep", "dur", None),
     ("estimate", "dur", None), ("tags", "list", None),
 ]
 CONFIG_KEYS = [
@@ -552,7 +624,7 @@ CONFIG_KEYS = [
     ("progress_every", "dur", 60.0), ("keep", "dur", 7 * 86400.0), ("env", "env", None),
     ("secret_names", "list", None), ("not_secret", "list", None), ("secret_prefixes", "list", None),
     ("on_first_start", "cmd", None), ("on_idle", "cmd", None), ("hook_timeout", "dur", 120.0),
-    ("idle_after", "dur", 60.0),
+    ("idle_after", "dur", 60.0), ("log_max", "num", 100.0),
 ]
 LIST_KINDS = ("list", "env", "tokens")
 CMD_KEYS_SPEC = [k for k, kind, _ in SPEC_KEYS if kind == "cmd"]
@@ -717,6 +789,7 @@ DEFAULT_CONFIG = """# jm machine config (design/JM_DESIGN.md sec 6). `key = valu
 # on_idle        = data-ro.sh    # any command (example name): nothing has run for idle_after
 # idle_after     = 60s
 # hook_timeout   = 120s
+# log_max        = 100         # MB per job log and for daemon.log (the older part goes to *.1); 0 = no limit
 """
 
 
@@ -922,7 +995,7 @@ class Ctx(object):
             j.event(event or ("%s: %s" % (state, reason) if reason else state))
             if state in TERMINAL:
                 j.info["ended"] = utc()
-                j.info.pop("waiting_since", None)
+                pop_stamp(j.info, "waiting_since")
                 j.save_info()
                 self.q_remove(j.id)
             elif j.id not in self.queue:
@@ -1414,8 +1487,9 @@ def start_job(ctx, j, use, daemon):
     run = int(j.info.get("run", "0") or 0) + 1
     how = j.info.get("how") or "start"
     token = secrets.token_hex(8)
-    j.info.update({"run": str(run), "run_start": utc(), "how": how})
-    j.info.pop("waiting_since", None)
+    j.info.update({"run": str(run), "how": how})
+    stamp_now(j.info, "run_start")
+    pop_stamp(j.info, "waiting_since")
     j.save_info()
     for f in ("exit", "stop_req", "child"):
         remove_file(j.path(f))
@@ -1474,7 +1548,6 @@ def daemon_pass(store, daemon):
         ctx.queue_dirty = True
 
     # 1. Running jobs: finished, cut off, timed out, or adopted as they are.
-    now = time.time()
     for jid in list(ctx.queue):
         j = ctx.job(jid)
         if j is None or j.state not in (RUNNING, STOPPING):
@@ -1487,8 +1560,7 @@ def daemon_pass(store, daemon):
             pi = j.pidinfo()
             if pi is not None and proc_alive(*pi):
                 t = j.spec["timeout"]
-                started = parse_utc(j.info.get("run_start", "")) or now
-                if t and now - started > t and not os.path.exists(j.path("stop_req")):
+                if t and (elapsed(j.info, "run_start") or 0.0) > t and not os.path.exists(j.path("stop_req")):
                     write_kv_file(j.path("stop_req"), {"after": "fail", "reason": "timeout after %s" %
                                                        fmt_duration(t)})
                     ctx.set_state(j, STOPPING, "timeout after %s; stopping" % fmt_duration(t))
@@ -1525,7 +1597,7 @@ def daemon_pass(store, daemon):
         if why is None:
             why = never_fits(cfg, s)
         if why is not None:
-            if j.info.pop("waiting_since", None):
+            if pop_stamp(j.info, "waiting_since"):
                 j.save_info()
             ctx.set_state(j, WAITING, why)
             continue
@@ -1544,11 +1616,11 @@ def daemon_pass(store, daemon):
             start_job(ctx, j, use, daemon)
             continue
         if not j.info.get("waiting_since"):
-            j.info["waiting_since"] = utc()
+            stamp_now(j.info, "waiting_since")
             j.save_info()
         if head is None:
             head = j
-            waited = now - (parse_utc(j.info["waiting_since"]) or now)
+            waited = elapsed(j.info, "waiting_since") or 0.0
             if not cfg["backfill"]:
                 blocked = "fifo (backfill = no)"
             elif s["drain"]:
@@ -1561,8 +1633,8 @@ def daemon_pass(store, daemon):
     ctx.commit()
     if use.running == 0 and daemon.busy and not daemon.want_hook:
         # Idle for idle_after before on_idle, so a chain of jobs does not flip the machine back and forth.
-        daemon.idle_since = daemon.idle_since or now
-        if now - daemon.idle_since >= cfg["idle_after"]:
+        daemon.idle_since = daemon.idle_since or time.monotonic()
+        if time.monotonic() - daemon.idle_since >= cfg["idle_after"]:
             if cfg["on_idle"]:
                 daemon.want_hook = "on_idle"
             else:
@@ -1590,15 +1662,15 @@ def run_wanted_hook(store, cfg, daemon):
 
 def sample_progress(store, cfg, daemon):
     """Run each running job's `progress` command every progress_every; keep the last 20 lines."""
-    now = time.time()
+    now = time.monotonic()
     for jid in store.read_queue():
         j = Job(store, jid)
         if not j.exists() or j.state != RUNNING or not j.spec["progress"] or not j.cmd_active():
             continue
-        last = daemon.progress_at.get(jid, 0)
-        if last > (parse_utc(j.info.get("run_start", "")) or 0) and now - last < cfg["progress_every"]:
+        run, last = daemon.progress_at.get(jid, (None, 0.0))
+        if run == j.info.get("run") and now - last < cfg["progress_every"]:
             continue
-        daemon.progress_at[jid] = now
+        daemon.progress_at[jid] = (j.info.get("run"), now)
         try:
             env = job_env(store, cfg, j)
             p = subprocess.Popen(j.spec["progress"], shell=True, env=env, cwd=job_cwd(store, j),
@@ -1652,6 +1724,9 @@ def daemon_run(store, quiet=False):
                 if daemon.want_hook:
                     again = run_wanted_hook(store, cfg, daemon)
                 sample_progress(store, cfg, daemon)
+                if trim_log(store.p("daemon.log"), cfg["log_max"]):
+                    store.log("daemon.log over log_max %s MB; the part before is in daemon.log.1" % fmt_num(
+                        cfg["log_max"]))
             except Exception:
                 store.log("pass failed:\n" + traceback.format_exc())
             reap_spawned()
@@ -1660,8 +1735,8 @@ def daemon_run(store, quiet=False):
             if os.path.exists(store.p("daemon.stop")):
                 break
             last = read_text(store.p("wake"))
-            deadline = time.time() + max(0.05, cfg["poll"])
-            while time.time() < deadline and not stop:
+            deadline = time.monotonic() + max(0.05, cfg["poll"])
+            while time.monotonic() < deadline and not stop:
                 time.sleep(0.05)
                 if read_text(store.p("wake")) != last or os.path.exists(store.p("daemon.stop")):
                     break
@@ -1712,9 +1787,12 @@ def wrapper_body(store, jid, token):
     run = j.info.get("run", "1")
     how = j.info.get("how", "start")
     paths = [j.path("log")] + ([j.path("stderr")] if spec["split_stderr"] else [])
+    try:
+        cap = spec["log_max"] if spec["log_max"] is not None else store.config()["log_max"]
+    except JmError:
+        cap = 0  # a bad config fails the start below, with its message in the log
     for logp in paths:
-        if spec["log_max"] and os.path.exists(logp) and os.path.getsize(logp) > spec["log_max"] * 1048576:
-            os.replace(logp, logp + ".1")
+        rotate_log(logp, cap)
     log = open(paths[0], "ab")
     err = open(paths[1], "ab") if len(paths) > 1 else None  # split_stderr: every command's stderr goes here
 
@@ -1723,6 +1801,13 @@ def wrapper_body(store, jid, token):
         for f in (log, err) if err else (log,):
             f.write(("==== jm %s run %s (%s): %s ====\n" % (jid, run, how, msg)).encode("utf-8"))
             f.flush()
+
+    def trim():
+        for path, f in zip(paths, (log, err)):
+            if trim_log(path, cap):
+                f.write(("==== jm %s run %s (%s): over log_max %s MB at %s; the part before is in %s.1 ====\n" % (
+                    jid, run, how, fmt_num(cap), utc(), os.path.basename(path))).encode("utf-8"))
+                f.flush()
 
     def finish(rc, note=""):
         say("ended %s, exit %d%s" % (utc(), rc, (" (%s)" % note) if note else ""))
@@ -1748,13 +1833,17 @@ def wrapper_body(store, jid, token):
         stopping = False
         hard_at = None
         killed = False
+        trim_at = 0.0
         while True:
             rc = child.poll()
             if rc is not None:
                 break
+            if time.monotonic() >= trim_at:
+                trim_at = time.monotonic() + 1.0
+                trim()
             if not stopping and os.path.exists(j.path("stop_req")):
                 stopping = True
-                hard_at = time.time() + (spec["stop_grace"] if spec["stop_grace"] is not None else 60)
+                hard_at = time.monotonic() + (spec["stop_grace"] if spec["stop_grace"] is not None else 60)
                 say("stop requested %s" % utc())
                 if spec["stop"]:
                     try:
@@ -1767,7 +1856,7 @@ def wrapper_body(store, jid, token):
                         kill_group(child.pid)
                 elif not kill_group(child.pid) and IS_WIN:
                     kill_group(child.pid, hard=True)  # taskkill without /F refused: no gentle way on Windows
-            if stopping and not killed and time.time() >= hard_at:
+            if stopping and not killed and time.monotonic() >= hard_at:
                 killed = True
                 say("still running %s after stop_grace; killing" % utc())
                 kill_group(child.pid, hard=True)
@@ -1775,7 +1864,7 @@ def wrapper_body(store, jid, token):
         if stopping and not IS_WIN:
             # The shell may be gone while something it started ignores TERM: the whole group goes.
             while group_exists(child.pid):
-                if time.time() >= hard_at:
+                if time.monotonic() >= hard_at:
                     say("group still running %s after stop_grace; killing" % utc())
                     kill_group(child.pid, hard=True)
                     break
@@ -1992,9 +2081,9 @@ def job_progress(j):
 def list_row(j, depth=0):
     reason = j.reason
     if j.state == RUNNING and j.cmd_active():
-        t0 = parse_utc(j.info.get("run_start", ""))
-        if t0:
-            reason = "%s, %s" % (reason, fmt_duration(time.time() - t0))
+        t = elapsed(j.info, "run_start")
+        if t is not None:
+            reason = "%s, %s" % (reason, fmt_duration(t))
     return "\t".join(["  " * depth + j.id, j.state, j.name(), reason, job_progress(j)])
 
 
@@ -2050,10 +2139,10 @@ def free_line(store):
     pending = [ctx.job(x) for x in ctx.queue]
     pending = [j for j in pending if j is not None and j.state in PENDING]
     parts.append("queue %d" % len(pending))
-    waits = [parse_utc(j.info.get("waiting_since", "")) for j in pending]
-    waits = [w for w in waits if w]
+    waits = [elapsed(j.info, "waiting_since") for j in pending]
+    waits = [w for w in waits if w is not None]
     if waits:
-        parts.append("head_wait %s" % fmt_duration(time.time() - min(waits)))
+        parts.append("head_wait %s" % fmt_duration(max(waits)))
     return " ".join(parts)
 
 
@@ -2357,7 +2446,7 @@ def cmd_applog(store, a):
             for k in jobs:
                 p = start(k)
                 if p is not None:
-                    heard[k.id] = time.time() + 1.0  # quiet counts from its start, plus a second to start up
+                    heard[k.id] = time.monotonic() + 1.0  # quiet counts from its start, plus a second to start up
                     t = threading.Thread(target=pump, args=(k.id, p))
                     t.daemon = True
                     t.start()
@@ -2369,11 +2458,11 @@ def cmd_applog(store, a):
                     if line is None:
                         running -= 1
                     else:
-                        heard[jid] = time.time()
+                        heard[jid] = time.monotonic()
                         sec.write(jid, line)
                 except queue.Empty:
                     pass
-                now = time.time()
+                now = time.monotonic()
                 if now - checked < 0.5:
                     continue
                 checked = now
@@ -2408,7 +2497,7 @@ def cmd_applog(store, a):
 def cmd_wait(store, a):
     store.init()
     jid = Ctx(store).need(a.id).id
-    deadline = None if a.timeout is None else time.time() + parse_duration(a.timeout)
+    deadline = None if a.timeout is None else time.monotonic() + parse_duration(a.timeout)
     while True:
         j = Job(store, jid)
         if j.state in ENDED:
@@ -2421,7 +2510,7 @@ def cmd_wait(store, a):
                 rc = int(runs[-2])
             warn("%s %s%s" % (jid, j.state, (": " + j.reason) if j.reason else ""))
             return rc if rc and 0 < rc < 256 else 1
-        if deadline is not None and time.time() >= deadline:
+        if deadline is not None and time.monotonic() >= deadline:
             warn("timeout: %s is still %s" % (jid, j.state))
             return EXIT_ERR
         time.sleep(0.2)
@@ -2781,13 +2870,17 @@ def daemon_start(store, quiet=False):
         if not quiet:
             out(daemon_status_line(store)[1])
         return EXIT_OK
+    try:
+        rotate_log(store.p("daemon.log"), store.config()["log_max"])
+    except JmError:
+        pass
     log = open(store.p("daemon.log"), "ab")
     try:
         p = spawn_detached(jm_argv(store) + ["daemon", "run"], stdout=log, cwd=store.home)
     finally:
         log.close()
-    deadline = time.time() + 15
-    while time.time() < deadline:
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
         if store.daemon_running() and os.path.exists(store.p("daemon.pid")):
             if not quiet:
                 out(daemon_status_line(store)[1])
@@ -2806,8 +2899,8 @@ def daemon_stop(store, quiet=False):
         return EXIT_OK
     write_atomic(store.p("daemon.stop"), utc() + "\n")
     store.wake()
-    deadline = time.time() + 30
-    while time.time() < deadline:
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
         if not store.daemon_running():
             if not quiet:
                 out("daemon: stopped (running jobs keep running)")

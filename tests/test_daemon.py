@@ -545,6 +545,18 @@ class TestLogs(JmTestCase):
         self.assertIn("stderr (last 3 lines)", self.jm_ok("status", c1))
 
 
+    @unittest.skipIf(IS_WIN, "logs are trimmed between runs only on Windows")
+    def test_log_max_during_run(self):
+        # ~60 KB over 3 s with log_max = 5 KB: the wrapper trims the log while the job writes it.
+        code = "import time; [print('%05d ' % i + 'x' * 2000, flush=True) or time.sleep(0.1) for i in range(30)]"
+        a = self.submit(spec("%s -c %s" % (q(PY), q(code)), log_max="0.005"))
+        self.assertEqual(self.wait_ended(a), "done")
+        log = self.jobfile(a, "log")
+        self.assertIn("over log_max 0.005 MB", log)
+        self.assertLess(len(log), 30000)
+        self.assertIn("00029 ", self.jobfile(a, "log.1") + log)  # the last line: in the copy or after the cut
+
+
 class TestApplog(JmTestCase):
     daemon = False
 

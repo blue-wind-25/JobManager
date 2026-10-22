@@ -21,3 +21,8 @@
   (`jl js jf ja jt`, the ID optional).
 - Fix: the wrapper identity check could take a just-started wrapper for dead (its command line is the daemon's
   until exec) and cached that for the daemon's life; a Unix miss is now re-read for up to 1 s (RDD_004).
+- Durations on the monotonic clock (RDD_013): `timeout`, `drain_after`, `idle_after`, `stop_grace` and the running
+  time no longer jump with the wall clock (NTP setting the date on a Pi without RTC); job files keep a
+  boot-scoped monotonic stamp beside the UTC time (Linux).
+- Logs capped by default (RDD_013): config `log_max` (100 MB) for job logs and `daemon.log`, overridable per spec,
+  `0` = no limit; the older part goes to `*.1`; on Unix also trimmed while the job runs.

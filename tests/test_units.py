@@ -18,7 +18,9 @@
 # process identity.
 
 import os
+import shutil
 import subprocess
+import tempfile
 import time
 import unittest
 
@@ -45,6 +47,35 @@ class TestDurations(unittest.TestCase):
     def test_utc_round_trip(self):
         t = 1790000000
         self.assertEqual(jm.parse_utc(jm.utc(t)), t)
+
+    def test_elapsed(self):
+        # A stamp from this boot counts on the monotonic clock: the wall-clock time beside it (here years off,
+        # as on a Pi that booted without RTC before NTP set the date) does not matter.
+        info = {}
+        jm.stamp_now(info, "t")
+        self.assertLess(jm.elapsed(info, "t"), 5)
+        if jm.boot_id():
+            info = {"t": "2000-01-01T00:00:00Z", "t_mono": "%s %.3f" % (jm.boot_id(), time.monotonic() - 5)}
+            self.assertAlmostEqual(jm.elapsed(info, "t"), 5, delta=1)
+            info["t_mono"] = "another-boot %.3f" % (time.monotonic() - 5)  # after a reboot: the wall clock
+            self.assertGreater(jm.elapsed(info, "t"), 86400)
+        self.assertIsNone(jm.elapsed({}, "t"))
+        self.assertGreater(jm.elapsed({"t": "2000-01-01T00:00:00Z"}, "t"), 86400)  # old state: wall clock
+
+    @unittest.skipIf(jm.IS_WIN, "logs are trimmed between runs only on Windows")
+    def test_trim_log(self):
+        d = tempfile.mkdtemp(prefix="jm-unit-")
+        try:
+            path = os.path.join(d, "log")
+            with open(path, "wb") as f:
+                f.write(b"x" * 3000)
+            self.assertFalse(jm.trim_log(path, 0.01))  # 10 KB: under the cap
+            self.assertTrue(jm.trim_log(path, 0.002))
+            self.assertEqual(os.path.getsize(path), 0)
+            self.assertEqual(os.path.getsize(path + ".1"), 3000)
+            self.assertFalse(jm.trim_log(path, 0))  # 0 = no limit
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
 
 
 SPEC = """# gso_b top-5 run
