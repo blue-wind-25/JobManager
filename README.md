@@ -64,7 +64,7 @@ Every key is described in [design/JM_DESIGN.md](design/JM_DESIGN.md) sec 5 (spec
 
 - [docs/GUIDE.md](docs/GUIDE.md): how jm behaves - job states, `start` / `resume` / `restart`, retries, groups
   and what happens when a child fails, stopping (and Windows), the `on_first_start` / `on_idle` machine hooks
-  (read-only data mounts), secrets, logs (`jm log` / `jm applog`).
+  (read-only data mounts), secrets, logs (`jm log` / `jm applog`), starting the daemon at boot.
 - [docs/REMOTE.md](docs/REMOTE.md): driving workers over ssh from a workstation (`ssh -t pi jm ...`, what differs)
   or a phone (two-letter shortcuts, [examples/jm-shortcuts.sh](examples/jm-shortcuts.sh)).
 - [docs/PORTING.md](docs/PORTING.md): moving a project's own queue / resume / waiter scripts to jm.

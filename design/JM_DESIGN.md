@@ -450,8 +450,9 @@ Python floor 3.6 matches CentOS 7's base-repo `python3`, so even that box runs i
 A decision record (RDD) first; it binds the steps below. Then:
 1. **CM5 install:** `~/bin/jm` from a tag; `JM_HOME=/mnt/data/pi/jm` (the root is read-only);
    `config`: `cpus = 4`, `ram = 4000`, `ram_reserve = 500`, `tokens = trainer:1`, `tokens = bench_jvm:2`,
-   `tokens = godot:1`, `on_first_start = data-rw.sh`, `home_rw = data-rw.sh`, `on_idle = data-ro.sh` (RDD_014); `jm daemon install systemd` if the
-   read-only root allows a user unit, else the `~/.bashrc` guard (`jm daemon bashrc`). jm and `JM_HOME` visible
+   `tokens = godot:1`, `on_first_start = data-rw.sh`, `home_rw = data-rw.sh`, `on_idle = data-ro.sh` (RDD_014); `jm daemon install systemd` (a user unit
+   works on the read-only root with one remount and the linger flag, docs/GUIDE.md sec 9; done 2026-10-23), the
+   `~/.bashrc` guard (`jm daemon bashrc`) beside it. jm and `JM_HOME` visible
    to non-interactive ssh (`/usr/local/bin/jm`, or the exports at the top of `~/.bashrc`), and
    `examples/jm-shortcuts.sh` sourced there for checks from the phone (docs/REMOTE.md).
 2. **Foreground modes** in the CM5 scripts that lack one: `cm5_train_extractor.sh foreground` (the trainer without

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- docs/GUIDE.md sec 9: starting the daemon at boot (service file vs cron vs ~/.bashrc), with the read-only-root
+  steps (remount, the linger flag when logind cannot write, a busy root on Raspberry Pi OS).
+
 ## 1.1.0 - 2026-10-23
 
 - A state dir that goes read-only while idle (RDD_014): new config key `home_rw`, a command any jm command that

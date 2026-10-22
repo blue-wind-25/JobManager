@@ -258,3 +258,52 @@ applog = journalctl --user -u my-render -n ${JM_LINES:-100} ${JM_FOLLOW:+-f} --n
   secret to print. Its output is masked like `jm log`.
 - Exit code 1 when a command exited non-zero or could not start (it is named on stderr), or when no job shown
   has an `applog`.
+
+## 9. Starting the daemon at boot
+
+Jobs survive a reboot only as far as the daemon comes back: a cut-off job is resumed (`on_boot = resume`) when the
+daemon next starts, not before. Three ways to start it, from most to least robust:
+
+| Way | Starts at boot without a login | Restarts a daemon that died | Needs |
+|---|---|---|---|
+| service file (`jm daemon install systemd \| launchd \| windows`) | yes (systemd: with linger) | yes (`Restart=on-failure`, 10 s) | the commands it prints |
+| cron `@reboot` line | yes | no | cron |
+| `jm daemon bashrc` line in `~/.bashrc` | no: at the first interactive login | at the next login | nothing |
+
+Prefer the service file: it is what jm generates and tests, it brings back a daemon that crashed, and on systemd its
+output goes to the journal, not to a file. Jobs run in their own sessions, so restarting or stopping the service
+leaves them running (`KillMode=process`). The `~/.bashrc` line can stay beside it: it does nothing while a daemon
+runs. A cron line (`@reboot /usr/local/bin/jm --home DIR daemon start --quiet`) is one line, but it starts the
+daemon once and never again if it dies.
+
+**systemd (Linux), once per machine:**
+
+```sh
+jm daemon stop                              # a daemon started by hand or by ~/.bashrc; running jobs keep running
+jm daemon install systemd                   # writes ~/.config/systemd/user/jm.service
+systemctl --user daemon-reload
+systemctl --user enable --now jm.service
+sudo loginctl enable-linger "$USER"         # start the user's services at boot, with nobody logged in
+```
+
+Stop the hand-started daemon first: a second daemon on the same state dir refuses to start ("already running"),
+and the service would retry it every 10 s. Check after a reboot without logging in interactively:
+`ssh host jm daemon status` and `jm list` (resumed jobs show `run N (resume)`).
+
+**On a read-only root** (the unit file, its enable link and the linger flag all live on the root):
+
+```sh
+sudo mount -o remount,rw /
+# ... the five commands above ...
+sudo mount -o remount,ro /
+```
+
+- `loginctl enable-linger` can fail with "Read-only file system" even after the remount: systemd-logind runs in its
+  own mount namespace, made while the root was read-only at boot. The flag is only an empty file, read at the next
+  boot, so create it directly: `sudo mkdir -p /var/lib/systemd/linger && sudo touch /var/lib/systemd/linger/$USER`.
+- If the remount back to read-only says "mount point is busy", some process has a file on the root open for
+  writing: `sudo lsof / | awk '$4 ~ /[0-9]+[wu]/'`. On Raspberry Pi OS that is often rpi-swap, which attaches its
+  swap file to a loop device whenever the root becomes writable (`Mechanism=none` in
+  `/etc/rpi/swap.conf.d/*.conf`, then stop `dev-zram0.swap` and `rpi-setup-loop@var-swap.service`).
+- With the state dir on a data mount that is read-only after boot, set `home_rw` (sec 6): the service's daemon runs
+  it at start-up (daemon.log: `home_rw: ... exited 0`), then resumes the cut-off jobs.
