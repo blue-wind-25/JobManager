@@ -19,11 +19,11 @@ There is no network port and no web UI: remote use is `ssh -t host jm ...`, with
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/blue-wind-25/JobManager/main/jm.py -o ~/bin/jm && chmod +x ~/bin/jm
+curl -fsSL https://raw.githubusercontent.com/blue-wind-25/JobManager/v1.0.0/jm.py -o ~/bin/jm && chmod +x ~/bin/jm
 jm daemon start                 # or: jm daemon install systemd | launchd | windows
 ```
 
-(Use a release tag instead of `main` in the URL once one exists, so a machine runs a known version.)
+(A release tag in the URL, not `main`, so every machine runs a known version; `jm --version` shows it.)
 The state dir is `~/.jm`; set `JM_HOME` or `--home DIR` for another one (e.g. a writable data mount).
 
 ## Quick start

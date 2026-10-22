@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (1.0.0.dev0)
+## 1.0.0 - 2026-10-22
 
 - jm v1 (design/JM_DESIGN.md sections 1-11, 12.5 and 16): state dir and lock, spec / config parser, CLI, daemon
   loop, scheduler with backfill and the drain guard, detached per-job wrapper, process identity (pid + start time

@@ -15,7 +15,8 @@ Last update: 2026-10-22.
 | jm v2 - sec 12.1 estimates / EASY backfill, sec 12.2 progress parsing and ETA | not started | `progress` samples are already stored in the v2 format |
 | jm v3 - sec 12.3 several users, sec 12.4 several machines (`jm free` already exists) | not started | |
 | claude-guards in its own repository; adoption in HowToTrainYourPetAI (CLAUDE_GUARDS.md sec 6) | not started | `guards/` moves out as is |
-| Dogfooding on the CM5 (JM_DESIGN.md sec 15.2) | not started | needs a v1.0.0 tag first |
+| Release 1.0.0 (`VERSION`, CHANGELOG; tag `v1.0.0` on the release PR's merge) | done | |
+| Dogfooding on the CM5 (JM_DESIGN.md sec 15.2) | not started | install from the `v1.0.0` tag |
 
 ## Tested
 
@@ -78,5 +79,6 @@ RDD_001 .. RDD_010 reviewed by the owner on 2026-10-21, RDD_011 .. RDD_013 on 20
 
 ## Next
 
-1. Merge PR #3, then tag `v1.0.0`.
-2. Dogfood on the CM5 (design sec 15.2), then v2.
+1. Dogfood v1.0.0 on the CM5 (design sec 15.2): one or two non-critical jobs under jm with the old scripts kept,
+   a power cut mid-run, logs checked from the phone, a chained job; then move the real work over.
+2. Then v2.
