@@ -100,7 +100,8 @@ Variables every job command sees: `JM_ID`, `JM_NAME`, `JM_HOME`, `JM_RUN`, `JM_H
 jm never stores a secret: a spec whose `env` names a secret (`..._TOKEN`, `..._PASSWORD`, ...) or holds a
 token-like value is refused. Pass secrets by name instead - `env_pass = NAME` (taken from the daemon's
 environment at each start) or `env_file = /path/0600-file` - and they are kept out of every job that does not ask
-for them. See design/JM_DESIGN.md sec 16.
+for them. `jm log`, `jm applog` and `jm status` mask token-like strings, and `applog` commands get no
+secrets at all. See design/JM_DESIGN.md sec 16.
 
 ## Repository layout
 

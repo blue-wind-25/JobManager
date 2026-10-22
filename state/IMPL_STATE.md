@@ -18,7 +18,10 @@ Last update: 2026-10-22.
 
 ## Tested
 
-- 2026-10-22, logs change (RDD_011) and phone shortcuts (RDD_012): 77 tests pass on Python 3.13 (Linux);
+- 2026-10-22, PR #3: the intermittent `test_token` failure was a real race (RDD_004 addendum): a wrapper checked
+  between fork and exec still shows the daemon's command line, and the miss was cached. Fixed (a Unix miss is
+  re-read for up to 1 s); 27 of 300 fresh processes missed before, 0 after; `test_token_after_fork` covers it.
+- 2026-10-22, logs change (RDD_011) and phone shortcuts (RDD_012): 78 tests pass on Python 3.13 (Linux);
   `vermin -t=3.6-` finds nothing newer than 3.6. CI matrix green on every runner for PR #3 (run 39711720510,
   commit 4104de7; push / PR triggers were on for that PR only, manual again after it).
 - `python3 -m unittest discover tests`: 73 tests (Python 3.13 and 3.6, 2026-10-21, after the hook changes). CI run 39576098266 (2026-10-21, commit 451f745) is green on
@@ -47,12 +50,6 @@ on_first_start / on_idle hooks; pause / cont; progress sampling and `jm status` 
 `--children`, `-n`, `JM_LINES`, no `env_pass` secret, a failing applog, `-f` ending with the job, `-f` on an
 ended job with a slow applog); the phone shortcuts (`examples/jm-shortcuts.sh`) in sh.
 
-## Known issues
-
-- `test_token` (unchanged since v1) failed once in three local runs (2026-10-22): `proc_alive` caches a token
-  miss, but right after a fork the child's command line is still the parent's. Proposed fix: cache only hits.
-  Waiting for the owner (this PR or a separate one).
-
 ## Known limits
 
 - The guards judge the command text only: prose in a shell heredoc that quotes a secret-looking name, or a word
@@ -60,7 +57,7 @@ ended job with a slow applog); the phone shortcuts (`examples/jm-shortcuts.sh`) 
 
 ## Decisions
 
-RDD_001 .. RDD_010 reviewed by the owner on 2026-10-21; RDD_011 and RDD_012 open.
+RDD_001 .. RDD_010 reviewed by the owner on 2026-10-21, RDD_011 and RDD_012 on 2026-10-22; none open.
 - Confirmed as built: RDD_005 (job environment minus secret names; the guard's name pattern), RDD_003
   (`jm restart` only for a running job, to the top of the queue; retries run `resume`, else `start`), RDD_006
   (`continue_on_fail`: recovery is the group's own business; no "stop running siblings" mode), RDD_007 (`jm list`
@@ -70,10 +67,13 @@ RDD_001 .. RDD_010 reviewed by the owner on 2026-10-21; RDD_011 and RDD_012 open
 - CI stays manual-trigger only (owner direction, 2026-10-21).
 - User documentation: docs/GUIDE.md (behaviour), docs/REMOTE.md (driving workers over ssh), docs/PORTING.md
   (moving a project's own job scripts to jm).
-- RDD_011 (logs, owner request 2026-10-22): open for the owner's review - in particular `split_stderr` off by
-  default, and `applog` getting no `env_pass` / `env_file` secrets.
+- RDD_011 (logs) confirmed: `split_stderr` off by default; `applog` gets no `env_pass` / `env_file` secrets
+  **and** its output is masked (documented; relax only if it causes problems).
+- RDD_012 (owner): no `jm --host` in v1; plain `ssh -t WORKER jm ...`, documented in docs/REMOTE.md, plus the
+  phone shortcuts.
+- RDD_004 addendum: the fork / exec window in the wrapper identity check (fixed in PR #3, see Tested).
 
 ## Next
 
-1. Owner review of RDD_011 / RDD_012 (PR #3), then tag `v1.0.0`.
+1. Merge PR #3, then tag `v1.0.0`.
 2. Dogfood on the CM5 (design sec 15.2), then v2.

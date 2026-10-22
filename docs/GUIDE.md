@@ -153,7 +153,11 @@ switch a fan profile): the names and what they do are the machine owner's choice
 - Jobs get the daemon's environment **minus every secret-looking variable**. A job that needs one names it:
   `env_pass = NAME` (taken from the daemon's environment at each start) or `env_file = /path` (a `KEY=VALUE`
   file, mode 0600, read at each start, never copied).
-- `jm log` and `jm status` mask token-looking strings; `jm log --raw` shows them, on a terminal only.
+- `jm log`, `jm applog` and `jm status` mask token-looking strings; `--raw` shows them, on a terminal only.
+- An `applog` command (sec 8) gets **no** `env_pass` / `env_file` secrets, and its output is masked too: masking
+  only recognises token-shaped values, so a plain password it printed would show. An applog that needs a
+  credential reads it itself (e.g. from its own 0600 file). This is deliberately strict and will be relaxed if
+  it gets in the way (RDD_011).
 
 ## 8. Logs: `jm log` and `jm applog`
 

@@ -316,9 +316,17 @@ def proc_alive(pid, start, token=None):
         return True
     key = (str(pid), start, token)
     if key not in _CMDLINE_OK:
-        cmd = proc_cmdline(pid)
-        if cmd is None:
-            return False
+        # Between fork and exec a Unix child still shows its parent's command line (the daemon writes a wrapper's
+        # pid file right after the fork), so a miss is final only once it has held for a second. A Windows
+        # process starts with its own command line.
+        deadline = time.time() + (0 if IS_WIN else 1.0)
+        while True:
+            cmd = proc_cmdline(pid)
+            if cmd is None:
+                return False
+            if token in cmd or time.time() >= deadline:
+                break
+            time.sleep(0.05)
         _CMDLINE_OK[key] = token in cmd
     return _CMDLINE_OK[key]
 

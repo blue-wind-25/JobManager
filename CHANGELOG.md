@@ -19,3 +19,5 @@
 - docs/REMOTE.md (RDD_012): driving a worker with `ssh -t WORKER jm ...` (what differs over ssh, the
   non-interactive PATH, short host names and aliases) and from a phone: examples/jm-shortcuts.sh
   (`jl js jf ja jt`, the ID optional).
+- Fix: the wrapper identity check could take a just-started wrapper for dead (its command line is the daemon's
+  until exec) and cached that for the daemon's life; a Unix miss is now re-read for up to 1 s (RDD_004).

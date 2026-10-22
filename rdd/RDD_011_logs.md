@@ -1,6 +1,7 @@
 # RDD_011 - Logs: `jm log` for groups and separate streams, `jm applog` for a job's own log
 
-Date: 2026-10-22. Status: resolved (owner request, 2026-10-22: "a custom command to retrieve a job's or group's
+Date: 2026-10-22. Status: resolved; confirmed by the owner 2026-10-22 (`split_stderr` off by default; applog
+secrets: both protections kept, see below). Owner request, 2026-10-22: "a custom command to retrieve a job's or group's
 log, optionally with its children; and the stdout / stderr of a job or group, optionally with its children").
 Extends design sec 4, 5 and 9.
 
@@ -56,6 +57,8 @@ Two different things are called "the log" of a job:
 - Its environment: the config's and the spec's `env` lines and `JM_ID`, `JM_NAME`, `JM_HOME`, `JM_RUN`,
   `JM_HOW`, `JM_PARENT`, `JM_STATE`, `JM_JM`, `JM_LINES`, `JM_FOLLOW` - **without** `env_pass` / `env_file`:
   its output is printed, often into a captured session, so it gets no secret it could print (design sec 16).
-  An applog that needs a credential reads it itself.
+  An applog that needs a credential reads it itself. **Owner, 2026-10-22: keep both** (no secrets in its
+  environment *and* masked output: masking alone misses a plain password such as `pw 1`); documented, and to be
+  relaxed only if it causes problems in practice.
 - Exit code: 0; 1 when an applog could not start (missing `cwd`) or exited non-zero (named on stderr), or when
   no job has an applog; 3 no such job; 4 `--raw` without a terminal.

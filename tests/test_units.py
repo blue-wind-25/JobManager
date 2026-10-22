@@ -177,6 +177,18 @@ class TestProcessIdentity(unittest.TestCase):
         self.assertIsNone(jm.proc_start_time(p.pid))
         self.assertFalse(jm.proc_alive(999999999, "1"))
 
+    @unittest.skipIf(jm.IS_WIN, "a Windows process has its own command line from the start")
+    def test_token_after_fork(self):
+        # Right after the fork the child's command line is still its parent's: that miss must not count.
+        pid, st = os.getpid(), jm.proc_start_time(os.getpid())
+        seen = ["python parent", "python parent", "jm _run j1 tokfork"]
+        real = jm.proc_cmdline
+        jm.proc_cmdline = lambda p: seen.pop(0) if len(seen) > 1 else seen[0]
+        try:
+            self.assertTrue(jm.proc_alive(pid, st, "tokfork"))
+        finally:
+            jm.proc_cmdline = real
+
     def test_token(self):
         tok = "tok%d" % int(time.time())
         p = subprocess.Popen([PY, "-c", "import time; time.sleep(30)", tok])

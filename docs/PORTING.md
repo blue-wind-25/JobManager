@@ -18,6 +18,7 @@ can start, stop and start again. This guide is the checklist (the design's versi
 | "retry with other settings" scripts | `jm requeue ID --spec-edit key=value`, or `jm set` then `jm requeue` |
 | a per-script queue file / ordering logic | `jm submit --top / --after ID`, `jm move`, `jm swap`, `jm hold` |
 | polling for completion, `tail -f` on a log | `jm wait ID` (exit code = the job's), `jm log -f ID` |
+| `> run.log 2>&1`, `nohup.out`, `\| tee run.log` only to keep the output somewhere | nothing: jm keeps stdout + stderr in the job's log (`jm log ID`, `log_max` rotates it) |
 | "where is the log of that run?" notes, `tail` on files under the run directory | `applog = tail -n ${JM_LINES:-200} ${JM_FOLLOW:+-f} out/train.log` in the spec; `jm applog [--children] ID` ([GUIDE.md](GUIDE.md) sec 8) |
 | `2> errors.txt` to keep the errors apart | `split_stderr = yes`; `jm log --stderr ID` |
 | a chain script: step 1, then step 2, then step 3 | three specs with `after`, or a group with `children` and `parallel = 1` |
@@ -25,6 +26,7 @@ can start, stop and start again. This guide is the checklist (the design's versi
 | remounting a read-only data disk around runs (scripts of any name) | `on_first_start` / `on_idle` in jm's config, set to your scripts ([GUIDE.md](GUIDE.md) sec 6) |
 | notification `curl` at the end of a script | `notify = ...` in the spec (runs on every state change, with `JM_STATE`) |
 | tokens exported in the script or in `~/.bashrc` for the job | `env_pass = NAME` / `env_file = /path` (mode 0600) |
+| `ssh host 'tail -f ...'`, status one-liners typed over ssh or from a phone | `ssh -t host jm log -f ID`; on the worker the shortcuts `jl jf ja` ([REMOTE.md](REMOTE.md)) |
 
 ## 2. Turn each script into a foreground, restartable command
 
@@ -45,6 +47,12 @@ A jm job's `start` command must:
    machine's prepare / undo scripts (`data-rw.sh` / `data-ro.sh` or whatever they are called there) - jm's hooks
    run them; see [GUIDE.md](GUIDE.md) sec 6 for making such scripts jm-aware when the calls cannot be removed at
    once.
+7. **Print, and say where its own log is** ([GUIDE.md](GUIDE.md) sec 8). Whatever the command prints goes to the
+   job's log (`jm log`), so drop redirections that only kept the output (`> run.log 2>&1`, `nohup.out`). A program
+   that writes its own log file keeps doing so: give the spec an `applog` command that prints it, so
+   `jm applog ID` finds it without knowing the run directory. To see the errors apart from the progress output,
+   set `split_stderr = yes` (`jm log --stderr ID`). The `applog` command gets the spec's `env` lines but not
+   `env_pass` / `env_file` secrets, so it must not need one to find or read the log.
 
 ## 3. Write the specs
 
@@ -74,9 +82,12 @@ job receives; the spec then uses `$DATA` (`cwd` and `env` values expand `$NAME`)
 jm config cpus=4 ram=4000 ram_reserve=500 tokens=trainer:1 tokens=gpu:1
 jm config on_first_start=/usr/local/bin/data-rw.sh on_idle=/usr/local/bin/data-ro.sh   # if needed; your own names
 jm daemon install systemd        # or launchd / windows; or `jm daemon bashrc` for a ~/.bashrc line
+sudo ln -s ~/bin/jm /usr/local/bin/jm   # so `ssh host jm ...` finds it (REMOTE.md sec 1)
 ```
 
-On a read-only root, put the state dir on the writable mount: `JM_HOME=/mnt/data/jm` (or `--home`).
+On a read-only root, put the state dir on the writable mount: `JM_HOME=/mnt/data/jm` (or `--home`), set where
+ssh commands see it too (the top of `~/.bashrc`, see [REMOTE.md](REMOTE.md) sec 1). For checking jobs from a phone,
+source the shortcuts there as well: `. ~/bin/jm-shortcuts.sh` ([REMOTE.md](REMOTE.md) sec 3).
 
 ## 5. A thin helper to submit from a workstation
 
@@ -91,14 +102,16 @@ sets=""; for kv in "$@"; do sets="$sets --set $kv"; done
 ssh "$host" "cd /mnt/data/project && git pull -q && jm submit $spec $sets"
 ```
 
-Status for the owner becomes `ssh pi jm list` (or `jp list` with `alias jp='ssh -t pi jm'`); logs
+`--set` values with spaces need quoting twice (the worker's shell splits the line again). Status for the owner
+becomes `ssh pi jm list` (or `jp list` with `alias jp='ssh -t pi jm'`); logs
 `jp log -f ID` (what the job printed) and `jp applog -f ID` (the log it writes itself), with `--children` for a
 whole group. See [REMOTE.md](REMOTE.md) for what differs over ssh, and for checking jobs from a phone.
 
 ## 6. Switch over safely
 
 1. Keep the old scripts until **one full cycle** has run under jm: submit, run, a reboot in the middle, the resume,
-   a chained job, the results fetched.
+   a chained job, the logs read from where you will watch them (`jm log` / `jm applog` over ssh, the phone), the
+   results fetched.
 2. Then delete the old queue / resume / waiter scripts and every `busy()`, `STOPPED` and settle sleep in one
    commit, and record the switch in the project's decision log.
 3. Jobs that were started by the old scripts are not known to jm: let them finish (or stop them) before the
