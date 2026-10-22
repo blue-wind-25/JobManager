@@ -49,6 +49,24 @@ KILL after `stop_grace`) and starts it again at the **top of the queue**, so it 
 anything else starts. On a job that is not running (queued, waiting, held, stopping, stopped, finished, or a
 group whose own command has ended) it fails with exit code 4 and changes nothing; use `jm requeue` for those.
 
+**Put the work in a script; keep the spec's commands one short line.** `start = sh tools/train.sh` is safer
+than a whole pipeline in the spec:
+- a spec value is not shell text: `#` after a space starts a comment even inside quotes (`echo "a #b"` becomes
+  `echo "a`; write `\#`), a long command needs `\` line continuations, and `$NAME` in a command is expanded by
+  the shell at run time, not by jm;
+- the same line must work in `sh` and, on Windows, in `cmd`; over ssh it is quoted once more (docs/REMOTE.md);
+- a script lives in the project's repository, is reviewed and versioned with the code, and can be run and
+  debugged by hand without jm (`JM_HOW=resume sh tools/train.sh`);
+- `start` and `resume` can be the same script, deciding by `$JM_HOW`; `set -eu` makes a failing step fail the
+  job instead of running on;
+- tokens in a command line are refused at submit (sec 7); a script reads them from the `env_pass` / `env_file`
+  variables.
+
+Short, one-word-ish commands are fine inline: `done_check = test -s out/model.bin`,
+`progress = tail -n 1 out/train.log`, `applog = tail -n ${JM_LINES:-200} ${JM_FOLLOW:+-f} out/train.log`.
+End the script with `exec` of the real program, so no shell sits between it and jm: its exit code is the job's,
+and `JM_PID` (given to a `stop` command) is the program itself. A template is in [PORTING.md](PORTING.md) sec 2.
+
 ## 3. Retries and timeouts
 
 - `retries = N`: after a failure the job goes back to the queue (same place) up to N times, as a `resume` run.

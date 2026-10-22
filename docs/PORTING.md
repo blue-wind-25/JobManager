@@ -55,6 +55,27 @@ A jm job's `start` command must:
    set `split_stderr = yes` (`jm log --stderr ID`). The `applog` command gets the spec's `env` lines but not
    `env_pass` / `env_file` secrets, so it must not need one to find or read the log.
 
+**One script per job, one short line in the spec.** Keep the work in the project's scripts and point the spec's
+`start` (and `resume`) at them: `start = sh tools/train.sh`. A pipeline or a `cd ... && ...` chain written into
+the spec meets jm's spec syntax (`#` after a space is a comment, even in quotes), must work in `sh` and `cmd`,
+gets quoted once more over ssh, and cannot be run by hand to debug it ([GUIDE.md](GUIDE.md) sec 2). A template:
+
+```sh
+#!/bin/sh
+# tools/train.sh - the jm job "train": start, resume and restart all run this; $JM_HOW says which.
+set -eu
+cd "$(dirname "$0")/.."                       # the project root, wherever jm's cwd is
+case "${JM_HOW:-start}" in
+    start) more="" ;;
+    *)     more="--resume" ;;                  # resume / restart: continue from the last checkpoint
+esac
+exec python3 train.py --out "out/$SET" $more  # exec: the program is the job's process, its exit code the job's
+```
+
+Run it by hand first (`SET=gso_b sh tools/train.sh`, then `JM_HOW=resume ...`). Short checks stay inline in the
+spec (`done_check = test -s out/model.bin`, `progress`, `applog`). On Windows, the same idea with a `.cmd` file
+or, simpler for both, a Python script (`start = python tools/train.py`).
+
 ## 3. Write the specs
 
 Keep them in the project, e.g. `jobs/<name>.jm`, committed:

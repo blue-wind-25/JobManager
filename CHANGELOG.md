@@ -26,3 +26,5 @@
   boot-scoped monotonic stamp beside the UTC time (Linux).
 - Logs capped by default (RDD_013): config `log_max` (100 MB) for job logs and `daemon.log`, overridable per spec,
   `0` = no limit; the older part goes to `*.1`; on Unix also trimmed while the job runs.
+- Docs: put a job's work in a script and keep the spec's commands one short line (GUIDE sec 2, PORTING sec 2,
+  with a template script).
