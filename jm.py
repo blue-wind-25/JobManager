@@ -25,7 +25,10 @@ See design/JM_DESIGN.md in the repository for the full design.
 
 import argparse
 import calendar
+import codecs
+import collections
 import os
+import queue
 import re
 import secrets
 import shlex
@@ -34,6 +37,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import traceback
 
@@ -78,6 +82,47 @@ def parse_utc(s):
         return float(calendar.timegm(time.strptime(s.strip(), "%Y-%m-%dT%H:%M:%SZ")))
     except (ValueError, AttributeError):
         return None
+
+
+_BOOT_ID = []
+
+
+def boot_id():
+    """Identifies this boot (Linux), so a time.monotonic() value kept in a file can be compared after a daemon
+    restart; None elsewhere (there durations stored in files fall back to the wall clock)."""
+    if not _BOOT_ID:
+        _BOOT_ID.append((read_text("/proc/sys/kernel/random/boot_id").strip() or None) if IS_LINUX else None)
+    return _BOOT_ID[0]
+
+
+def stamp_now(info, key):
+    """Record "now" in `info` as UTC text (for people and other boots) and, on Linux, as a monotonic stamp."""
+    info[key] = utc()
+    b = boot_id()
+    if b:
+        info[key + "_mono"] = "%s %.3f" % (b, time.monotonic())
+    else:
+        info.pop(key + "_mono", None)
+
+
+def elapsed(info, key):
+    """Seconds since the moment stamp_now() recorded, or None. The monotonic clock when the stamp is from this
+    boot: a wall-clock jump (NTP setting the date on a Pi that booted without RTC) must not fire a timeout or
+    the drain guard. Else the wall clock."""
+    f = info.get(key + "_mono", "").split()
+    if len(f) == 2 and f[0] == boot_id():
+        try:
+            return max(0.0, time.monotonic() - float(f[1]))
+        except ValueError:
+            pass
+    t0 = parse_utc(info.get(key, ""))
+    return None if t0 is None else max(0.0, time.time() - t0)
+
+
+def pop_stamp(info, key):
+    had = info.pop(key, None) is not None
+    info.pop(key + "_mono", None)
+    return had
 
 
 DUR_UNITS = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
@@ -138,6 +183,37 @@ def append_line(path, line):
         f.write(line.rstrip("\n") + "\n")
 
 
+def rotate_log(path, max_mb):
+    """Between runs (nothing writes it): over `max_mb`, the log becomes PATH.1 and a new one starts."""
+    try:
+        if max_mb and os.path.getsize(path) > max_mb * 1048576:
+            os.replace(path, path + ".1")
+    except OSError:
+        pass
+
+
+def trim_log(path, max_mb):
+    """While a log is written: over `max_mb`, copy it to PATH.1 and empty it. Its writers append (O_APPEND), so
+    they go on at the new end; at most the lines written in between are lost. True when trimmed. Not on Windows,
+    where a writer's own file position would leave a gap of NULs: logs rotate between runs only there."""
+    if not max_mb or IS_WIN:
+        return False
+    try:
+        if os.path.getsize(path) <= max_mb * 1048576:
+            return False
+        shutil.copyfile(path, path + ".1")
+        with open(path, "r+b") as f:
+            f.seek(os.path.getsize(path + ".1"))
+            rest = f.read()  # written while it was copied
+            f.truncate(0)
+        if rest:
+            with open(path + ".1", "ab") as f:
+                f.write(rest)
+        return True
+    except (IOError, OSError):
+        return False
+
+
 def remove_file(path):
     try:
         os.remove(path)
@@ -186,7 +262,7 @@ class FileLock(object):
 
     def acquire(self, blocking=True, timeout=None):
         fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
-        deadline = None if timeout is None else time.time() + timeout
+        deadline = None if timeout is None else time.monotonic() + timeout
         while True:
             try:
                 if IS_WIN:
@@ -197,7 +273,7 @@ class FileLock(object):
                 self.fd = fd
                 return True
             except (IOError, OSError):
-                if not blocking or (deadline is not None and time.time() >= deadline):
+                if not blocking or (deadline is not None and time.monotonic() >= deadline):
                     os.close(fd)
                     return False
                 time.sleep(0.05)
@@ -312,9 +388,17 @@ def proc_alive(pid, start, token=None):
         return True
     key = (str(pid), start, token)
     if key not in _CMDLINE_OK:
-        cmd = proc_cmdline(pid)
-        if cmd is None:
-            return False
+        # Between fork and exec a Unix child still shows its parent's command line (the daemon writes a wrapper's
+        # pid file right after the fork), so a miss is final only once it has held for a second. A Windows
+        # process starts with its own command line.
+        deadline = time.monotonic() + (0 if IS_WIN else 1.0)
+        while True:
+            cmd = proc_cmdline(pid)
+            if cmd is None:
+                return False
+            if token in cmd or time.monotonic() >= deadline:
+                break
+            time.sleep(0.05)
         _CMDLINE_OK[key] = token in cmd
     return _CMDLINE_OK[key]
 
@@ -525,13 +609,13 @@ SPEC_KEYS = [
     ("id", "str", None), ("name", "str", None), ("cwd", "str", None), ("note", "str", None),
     ("env", "env", None), ("env_pass", "list", None), ("env_file", "list", None),
     ("start", "cmd", None), ("resume", "cmd", None), ("stop", "cmd", None), ("stop_grace", "dur", 60.0),
-    ("done_check", "cmd", None), ("progress", "cmd", None),
+    ("done_check", "cmd", None), ("progress", "cmd", None), ("applog", "cmd", None), ("split_stderr", "bool", False),
     ("pre", "cmd", None), ("post", "cmd", None), ("notify", "cmd", None),
     ("cpu", "num", 1.0), ("ram", "num", 0.0), ("disk", "disk", None), ("tokens", "tokens", None),
     ("after", "list", None), ("after_ok", "bool", True), ("priority", "int", 0), ("retries", "int", 0),
     ("timeout", "dur", None), ("on_boot", "enum:resume|hold|fail", "resume"), ("drain", "bool", False),
     ("children", "list", None), ("parallel", "int", 0), ("continue_on_fail", "bool", False),
-    ("artifacts", "list", None), ("nice", "int", 5), ("log_max", "num", 0.0), ("keep", "dur", None),
+    ("artifacts", "list", None), ("nice", "int", 5), ("log_max", "num", None), ("keep", "dur", None),
     ("estimate", "dur", None), ("tags", "list", None),
 ]
 CONFIG_KEYS = [
@@ -540,7 +624,7 @@ CONFIG_KEYS = [
     ("progress_every", "dur", 60.0), ("keep", "dur", 7 * 86400.0), ("env", "env", None),
     ("secret_names", "list", None), ("not_secret", "list", None), ("secret_prefixes", "list", None),
     ("on_first_start", "cmd", None), ("on_idle", "cmd", None), ("hook_timeout", "dur", 120.0),
-    ("idle_after", "dur", 60.0),
+    ("idle_after", "dur", 60.0), ("log_max", "num", 100.0),
 ]
 LIST_KINDS = ("list", "env", "tokens")
 CMD_KEYS_SPEC = [k for k, kind, _ in SPEC_KEYS if kind == "cmd"]
@@ -705,6 +789,7 @@ DEFAULT_CONFIG = """# jm machine config (design/JM_DESIGN.md sec 6). `key = valu
 # on_idle        = data-ro.sh    # any command (example name): nothing has run for idle_after
 # idle_after     = 60s
 # hook_timeout   = 120s
+# log_max        = 100         # MB per job log and for daemon.log (the older part goes to *.1); 0 = no limit
 """
 
 
@@ -910,7 +995,7 @@ class Ctx(object):
             j.event(event or ("%s: %s" % (state, reason) if reason else state))
             if state in TERMINAL:
                 j.info["ended"] = utc()
-                j.info.pop("waiting_since", None)
+                pop_stamp(j.info, "waiting_since")
                 j.save_info()
                 self.q_remove(j.id)
             elif j.id not in self.queue:
@@ -1402,8 +1487,9 @@ def start_job(ctx, j, use, daemon):
     run = int(j.info.get("run", "0") or 0) + 1
     how = j.info.get("how") or "start"
     token = secrets.token_hex(8)
-    j.info.update({"run": str(run), "run_start": utc(), "how": how})
-    j.info.pop("waiting_since", None)
+    j.info.update({"run": str(run), "how": how})
+    stamp_now(j.info, "run_start")
+    pop_stamp(j.info, "waiting_since")
     j.save_info()
     for f in ("exit", "stop_req", "child"):
         remove_file(j.path(f))
@@ -1462,7 +1548,6 @@ def daemon_pass(store, daemon):
         ctx.queue_dirty = True
 
     # 1. Running jobs: finished, cut off, timed out, or adopted as they are.
-    now = time.time()
     for jid in list(ctx.queue):
         j = ctx.job(jid)
         if j is None or j.state not in (RUNNING, STOPPING):
@@ -1475,8 +1560,7 @@ def daemon_pass(store, daemon):
             pi = j.pidinfo()
             if pi is not None and proc_alive(*pi):
                 t = j.spec["timeout"]
-                started = parse_utc(j.info.get("run_start", "")) or now
-                if t and now - started > t and not os.path.exists(j.path("stop_req")):
+                if t and (elapsed(j.info, "run_start") or 0.0) > t and not os.path.exists(j.path("stop_req")):
                     write_kv_file(j.path("stop_req"), {"after": "fail", "reason": "timeout after %s" %
                                                        fmt_duration(t)})
                     ctx.set_state(j, STOPPING, "timeout after %s; stopping" % fmt_duration(t))
@@ -1513,7 +1597,7 @@ def daemon_pass(store, daemon):
         if why is None:
             why = never_fits(cfg, s)
         if why is not None:
-            if j.info.pop("waiting_since", None):
+            if pop_stamp(j.info, "waiting_since"):
                 j.save_info()
             ctx.set_state(j, WAITING, why)
             continue
@@ -1532,11 +1616,11 @@ def daemon_pass(store, daemon):
             start_job(ctx, j, use, daemon)
             continue
         if not j.info.get("waiting_since"):
-            j.info["waiting_since"] = utc()
+            stamp_now(j.info, "waiting_since")
             j.save_info()
         if head is None:
             head = j
-            waited = now - (parse_utc(j.info["waiting_since"]) or now)
+            waited = elapsed(j.info, "waiting_since") or 0.0
             if not cfg["backfill"]:
                 blocked = "fifo (backfill = no)"
             elif s["drain"]:
@@ -1549,8 +1633,8 @@ def daemon_pass(store, daemon):
     ctx.commit()
     if use.running == 0 and daemon.busy and not daemon.want_hook:
         # Idle for idle_after before on_idle, so a chain of jobs does not flip the machine back and forth.
-        daemon.idle_since = daemon.idle_since or now
-        if now - daemon.idle_since >= cfg["idle_after"]:
+        daemon.idle_since = daemon.idle_since or time.monotonic()
+        if time.monotonic() - daemon.idle_since >= cfg["idle_after"]:
             if cfg["on_idle"]:
                 daemon.want_hook = "on_idle"
             else:
@@ -1578,15 +1662,15 @@ def run_wanted_hook(store, cfg, daemon):
 
 def sample_progress(store, cfg, daemon):
     """Run each running job's `progress` command every progress_every; keep the last 20 lines."""
-    now = time.time()
+    now = time.monotonic()
     for jid in store.read_queue():
         j = Job(store, jid)
         if not j.exists() or j.state != RUNNING or not j.spec["progress"] or not j.cmd_active():
             continue
-        last = daemon.progress_at.get(jid, 0)
-        if last > (parse_utc(j.info.get("run_start", "")) or 0) and now - last < cfg["progress_every"]:
+        run, last = daemon.progress_at.get(jid, (None, 0.0))
+        if run == j.info.get("run") and now - last < cfg["progress_every"]:
             continue
-        daemon.progress_at[jid] = now
+        daemon.progress_at[jid] = (j.info.get("run"), now)
         try:
             env = job_env(store, cfg, j)
             p = subprocess.Popen(j.spec["progress"], shell=True, env=env, cwd=job_cwd(store, j),
@@ -1640,6 +1724,9 @@ def daemon_run(store, quiet=False):
                 if daemon.want_hook:
                     again = run_wanted_hook(store, cfg, daemon)
                 sample_progress(store, cfg, daemon)
+                if trim_log(store.p("daemon.log"), cfg["log_max"]):
+                    store.log("daemon.log over log_max %s MB; the part before is in daemon.log.1" % fmt_num(
+                        cfg["log_max"]))
             except Exception:
                 store.log("pass failed:\n" + traceback.format_exc())
             reap_spawned()
@@ -1648,8 +1735,8 @@ def daemon_run(store, quiet=False):
             if os.path.exists(store.p("daemon.stop")):
                 break
             last = read_text(store.p("wake"))
-            deadline = time.time() + max(0.05, cfg["poll"])
-            while time.time() < deadline and not stop:
+            deadline = time.monotonic() + max(0.05, cfg["poll"])
+            while time.monotonic() < deadline and not stop:
                 time.sleep(0.05)
                 if read_text(store.p("wake")) != last or os.path.exists(store.p("daemon.stop")):
                     break
@@ -1664,8 +1751,8 @@ def daemon_run(store, quiet=False):
 # The per-job wrapper: `jm _run ID TOKEN` (design sec 3)
 # ---------------------------------------------------------------------------------------------------------------
 
-def popen_shell(cmd, env, cwd, log, nice=0):
-    kw = dict(shell=True, env=env, cwd=cwd, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT)
+def popen_shell(cmd, env, cwd, log, nice=0, err=None):
+    kw = dict(shell=True, env=env, cwd=cwd, stdin=subprocess.DEVNULL, stdout=log, stderr=err or subprocess.STDOUT)
     if IS_WIN:
         kw["creationflags"] = CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW | \
             (BELOW_NORMAL_PRIORITY_CLASS if nice > 0 else 0)
@@ -1699,14 +1786,28 @@ def wrapper_body(store, jid, token):
     spec = j.spec
     run = j.info.get("run", "1")
     how = j.info.get("how", "start")
-    logp = j.path("log")
-    if spec["log_max"] and os.path.exists(logp) and os.path.getsize(logp) > spec["log_max"] * 1048576:
-        os.replace(logp, logp + ".1")
-    log = open(logp, "ab")
+    paths = [j.path("log")] + ([j.path("stderr")] if spec["split_stderr"] else [])
+    try:
+        cap = spec["log_max"] if spec["log_max"] is not None else store.config()["log_max"]
+    except JmError:
+        cap = 0  # a bad config fails the start below, with its message in the log
+    for logp in paths:
+        rotate_log(logp, cap)
+    log = open(paths[0], "ab")
+    err = open(paths[1], "ab") if len(paths) > 1 else None  # split_stderr: every command's stderr goes here
 
     def say(msg):
-        log.write(("==== jm %s run %s (%s): %s ====\n" % (jid, run, how, msg)).encode("utf-8"))
-        log.flush()
+        # The banner goes into both files, so the runs in `stderr` can be told apart too.
+        for f in (log, err) if err else (log,):
+            f.write(("==== jm %s run %s (%s): %s ====\n" % (jid, run, how, msg)).encode("utf-8"))
+            f.flush()
+
+    def trim():
+        for path, f in zip(paths, (log, err)):
+            if trim_log(path, cap):
+                f.write(("==== jm %s run %s (%s): over log_max %s MB at %s; the part before is in %s.1 ====\n" % (
+                    jid, run, how, fmt_num(cap), utc(), os.path.basename(path))).encode("utf-8"))
+                f.flush()
 
     def finish(rc, note=""):
         say("ended %s, exit %d%s" % (utc(), rc, (" (%s)" % note) if note else ""))
@@ -1727,31 +1828,35 @@ def wrapper_body(store, jid, token):
 
     def watch(cmd, group_nice=0):
         """Run one command and wait for it, honouring a stop request (stop_req). Returns (rc, stopped)."""
-        child = popen_shell(cmd, env, cwd, log, group_nice)
+        child = popen_shell(cmd, env, cwd, log, group_nice, err)
         write_atomic(j.path("child"), "%d %s\n" % (child.pid, proc_start_time(child.pid) or "?"))
         stopping = False
         hard_at = None
         killed = False
+        trim_at = 0.0
         while True:
             rc = child.poll()
             if rc is not None:
                 break
+            if time.monotonic() >= trim_at:
+                trim_at = time.monotonic() + 1.0
+                trim()
             if not stopping and os.path.exists(j.path("stop_req")):
                 stopping = True
-                hard_at = time.time() + (spec["stop_grace"] if spec["stop_grace"] is not None else 60)
+                hard_at = time.monotonic() + (spec["stop_grace"] if spec["stop_grace"] is not None else 60)
                 say("stop requested %s" % utc())
                 if spec["stop"]:
                     try:
                         e2 = dict(env)
                         e2["JM_PID"] = str(child.pid)
                         subprocess.Popen(spec["stop"], shell=True, env=e2, cwd=cwd, stdin=subprocess.DEVNULL,
-                                         stdout=log, stderr=subprocess.STDOUT)
+                                         stdout=log, stderr=err or subprocess.STDOUT)
                     except OSError as e:
                         say("stop command failed: %s" % e)
                         kill_group(child.pid)
                 elif not kill_group(child.pid) and IS_WIN:
                     kill_group(child.pid, hard=True)  # taskkill without /F refused: no gentle way on Windows
-            if stopping and not killed and time.time() >= hard_at:
+            if stopping and not killed and time.monotonic() >= hard_at:
                 killed = True
                 say("still running %s after stop_grace; killing" % utc())
                 kill_group(child.pid, hard=True)
@@ -1759,7 +1864,7 @@ def wrapper_body(store, jid, token):
         if stopping and not IS_WIN:
             # The shell may be gone while something it started ignores TERM: the whole group goes.
             while group_exists(child.pid):
-                if time.time() >= hard_at:
+                if time.monotonic() >= hard_at:
                     say("group still running %s after stop_grace; killing" % utc())
                     kill_group(child.pid, hard=True)
                     break
@@ -1788,7 +1893,7 @@ def wrapper_body(store, jid, token):
     if spec["post"]:
         env["JM_EXIT"] = str(rc)
         try:
-            p = popen_shell(spec["post"], env, cwd, log)
+            p = popen_shell(spec["post"], env, cwd, log, err=err)
             p.wait()
         except OSError as e:
             say("post failed: %s" % e)
@@ -1802,6 +1907,9 @@ def wrapper_body(store, jid, token):
 def sim_main(a):
     if a.trap and not IS_WIN:
         signal.signal(signal.SIGTERM, lambda *x: sys.stdout.write("sim: ignoring TERM\n") or sys.stdout.flush())
+    if a.stderr:
+        sys.stderr.write(a.stderr + "\n")
+        sys.stderr.flush()
     for name in a.print_env:
         line = "env %s=%s" % (name, os.environ.get(name, "<unset>"))
         if a.out:
@@ -1973,9 +2081,9 @@ def job_progress(j):
 def list_row(j, depth=0):
     reason = j.reason
     if j.state == RUNNING and j.cmd_active():
-        t0 = parse_utc(j.info.get("run_start", ""))
-        if t0:
-            reason = "%s, %s" % (reason, fmt_duration(time.time() - t0))
+        t = elapsed(j.info, "run_start")
+        if t is not None:
+            reason = "%s, %s" % (reason, fmt_duration(t))
     return "\t".join(["  " * depth + j.id, j.state, j.name(), reason, job_progress(j)])
 
 
@@ -2031,10 +2139,10 @@ def free_line(store):
     pending = [ctx.job(x) for x in ctx.queue]
     pending = [j for j in pending if j is not None and j.state in PENDING]
     parts.append("queue %d" % len(pending))
-    waits = [parse_utc(j.info.get("waiting_since", "")) for j in pending]
-    waits = [w for w in waits if w]
+    waits = [elapsed(j.info, "waiting_since") for j in pending]
+    waits = [w for w in waits if w is not None]
     if waits:
-        parts.append("head_wait %s" % fmt_duration(time.time() - min(waits)))
+        parts.append("head_wait %s" % fmt_duration(max(waits)))
     return " ".join(parts)
 
 
@@ -2090,6 +2198,8 @@ def cmd_status(store, a):
     out("start: %s" % mask_secrets(s["start"] or "-", ctx.cfg))
     if s["resume"]:
         out("resume: %s" % mask_secrets(s["resume"], ctx.cfg))
+    if s["applog"]:
+        out("applog: %s" % mask_secrets(s["applog"], ctx.cfg))
     env_bits = []
     if s["env"]:
         env_bits.append("env " + " ".join(k for k, _ in s["env"]))
@@ -2128,62 +2238,266 @@ def cmd_status(store, a):
         out("progress: %s" % prog)
     if IS_WIN and s["env_file"]:
         out("warning: env_file permissions are not checked on Windows")
-    tail = read_text(j.path("log")).splitlines()[-a.lines:] if a.lines else []
-    if tail:
-        out("log (last %d lines):" % len(tail))
-        for line in tail:
-            out("  " + mask_secrets(line, ctx.cfg))
+    for name in ("log", "stderr") if s["split_stderr"] else ("log",):
+        tail = read_text(j.path(name)).splitlines()[-a.lines:] if a.lines else []
+        if tail:
+            out("%s (last %d lines):" % (name, len(tail)))
+            for line in tail:
+                out("  " + mask_secrets(line, ctx.cfg))
     return EXIT_OK
+
+
+# logs: `jm log` (what jm captured) and `jm applog` (what the job's own `applog` command prints) ---------------
+
+def log_jobs(ctx, j, with_children):
+    """The job, then with --children its descendants, depth first."""
+    return [j] + ([ctx.job(c) for c in ctx.descendants(j.id)] if with_children else [])
+
+
+def log_show(a, cfg):
+    if a.raw and not sys.stdout.isatty():
+        raise JmError("--raw shows unmasked secrets and needs a terminal; refused for captured output",
+                      EXIT_STATE)
+    return (lambda s: s) if a.raw else (lambda s: mask_secrets(s, cfg))
+
+
+class Sections(object):
+    """Writes several jobs' output with a `==> ID <==` line whenever the job changes (as `tail` does for several
+    files); with one job and no --children, the output is written as is."""
+
+    def __init__(self, multi, show):
+        self.multi = multi
+        self.show = show
+        self.last = None
+
+    def write(self, jid, text):
+        if not text:
+            return
+        if self.multi:
+            if jid != self.last:
+                sys.stdout.write("==> %s <==\n" % jid)
+            if not text.endswith("\n"):
+                text += "\n"  # the next section must start on its own line
+        self.last = jid
+        sys.stdout.write(self.show(text.replace("\r\n", "\n")))
+        sys.stdout.flush()
+
+
+def log_files(ctx, j, a, warned):
+    """(id, path) of the files `jm log` shows. Without split_stderr a job has no separate stderr: both streams
+    are in its `log`, so --stderr skips it and --stdout says so (once per job; a lone job --stderr is an error)."""
+    files = []
+    for k in log_jobs(ctx, j, a.children):
+        split = k.spec["split_stderr"]
+        if (a.stdout or (a.stderr and a.children)) and not split and k.id not in warned:
+            warned.add(k.id)
+            warn("%s: split_stderr = no: stdout and stderr are both in its log%s" % (
+                k.id, "; skipped" if a.stderr else ""))
+        if a.stderr and not split:
+            continue
+        files.append((k.id, k.path("stderr" if a.stderr else "log")))
+    return files
+
+
+def new_decoder():
+    return codecs.getincrementaldecoder("utf-8")("replace")
 
 
 def cmd_log(store, a):
     store.init()
-    j = Ctx(store).need(a.id)
-    cfg = store.config()
-    if a.raw and not sys.stdout.isatty():
-        raise JmError("--raw shows unmasked secrets and needs a terminal; refused for captured output",
-                      EXIT_STATE)
-    show = (lambda s: s) if a.raw else (lambda s: mask_secrets(s, cfg))
-    path = j.path("log")
-    text = read_text(path)
-    lines = text.splitlines(True)
-    if a.lines is not None:
-        lines = lines[-a.lines:] if a.lines > 0 else []
-    sys.stdout.write(show("".join(lines)))
-    sys.stdout.flush()
-    if not a.follow:
-        return EXIT_OK
-    pos = len(text.encode("utf-8"))
-    partial = ""
-    idle = 0
-    while True:
+    ctx = Ctx(store)
+    j = ctx.need(a.id)
+    show = log_show(a, ctx.cfg)
+    warned = set()
+    files = log_files(ctx, j, a, warned)
+    if a.stderr and not files:
+        raise JmError("%s: no separate stderr (spec: split_stderr = yes); `jm log %s` shows both streams" % (
+            j.id, j.id))
+    sec = Sections(a.children, show)
+    # Positions are byte offsets in the file (a text-mode read would count \r\n as one on Windows).
+    pos = {}
+    decoders = {}
+    partial = {}
+    for jid, path in files:
         try:
             with open(path, "rb") as f:
-                f.seek(pos)
-                chunk = f.read()
+                data = f.read()
         except (IOError, OSError):
-            chunk = b""
-        if chunk:
-            pos += len(chunk)
+            data = b""
+        pos[path] = len(data)
+        decoders[path] = new_decoder()
+        text = decoders[path].decode(data)
+        partial[path] = ""
+        if a.follow and not text.endswith("\n"):
+            # Hold back an unfinished last line: it is written once complete, in one piece.
+            text, partial[path] = text.rsplit("\n", 1) if "\n" in text else ("", text)
+            text = text + "\n" if text else ""
+        lines = text.splitlines(True)
+        if a.lines is not None:
+            lines = lines[-a.lines:] if a.lines > 0 else []
+        sec.write(jid, "".join(lines))
+    if not a.follow:
+        return EXIT_OK
+    idle = 0
+    while True:
+        if a.children:
+            files = log_files(Ctx(store), j, a, warned)  # a running group may have new children
+        got = False
+        for jid, path in files:
+            try:
+                size = os.path.getsize(path)
+                if path not in pos or size < pos[path]:  # a new child, or rotated (log_max) at a new run
+                    pos[path] = 0
+                    decoders[path] = new_decoder()
+                    partial[path] = ""
+                if size == pos[path]:
+                    continue
+                with open(path, "rb") as f:
+                    f.seek(pos[path])
+                    chunk = f.read()
+            except (IOError, OSError):
+                continue
+            pos[path] += len(chunk)
+            got = True
+            buf = partial[path] + decoders[path].decode(chunk)
+            if "\n" in buf:
+                done, buf = buf.rsplit("\n", 1)
+                sec.write(jid, done + "\n")
+            partial[path] = buf
+        if got:
             idle = 0
-            partial += chunk.decode("utf-8", "replace")
-            if "\n" in partial:
-                done, partial = partial.rsplit("\n", 1)
-                sys.stdout.write(show(done + "\n"))
-                sys.stdout.flush()
         else:
             idle += 1
-            if idle >= 5 and Job(store, j.id).state in ENDED:
-                if partial:
-                    sys.stdout.write(show(partial))
+            if idle >= 5 and all(Job(store, jid).state in ENDED for jid, _ in files):
+                for jid, path in files:
+                    sec.write(jid, partial.get(path, ""))
                 return EXIT_OK
         time.sleep(0.2)
+
+
+def applog_env(store, cfg, j, a):
+    """The job's `env` lines and JM_* variables, but no env_pass / env_file: an applog's output is printed, often
+    into a captured session, so it gets no secret it could print (design sec 16)."""
+    env = base_env(cfg)
+    for k, v in j.spec["env"]:
+        env[k] = expand_vars(v, env)
+    env.update({"JM_ID": j.id, "JM_NAME": j.name(), "JM_HOME": store.home, "JM_RUN": j.info.get("run", "0"),
+                "JM_HOW": j.info.get("how", "start"), "JM_PARENT": j.parent or "", "JM_STATE": j.state,
+                "JM_JM": shell_join([sys.executable, JM_PATH]),
+                "JM_LINES": "" if a.lines is None else str(max(a.lines, 0)), "JM_FOLLOW": "1" if a.follow else ""})
+    return env
+
+
+def applog_start(store, cfg, j, a):
+    cwd = job_cwd(store, j)
+    if not os.path.isdir(cwd):
+        raise JmError("cwd %s does not exist" % cwd)
+    # Its own process group, so a `tail -f` started by the shell goes too when jm ends it (Ctrl-C, closed pipe).
+    kw = dict(shell=True, env=applog_env(store, cfg, j, a), cwd=cwd, stdin=subprocess.DEVNULL,
+              stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if IS_WIN:
+        kw["creationflags"] = CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+    else:
+        kw["start_new_session"] = True
+    return subprocess.Popen(j.spec["applog"], **kw)
+
+
+def applog_lines(p):
+    dec = new_decoder()
+    for line in iter(p.stdout.readline, b""):
+        yield dec.decode(line)
+
+
+def cmd_applog(store, a):
+    store.init()
+    ctx = Ctx(store)
+    j = ctx.need(a.id)
+    show = log_show(a, ctx.cfg)
+    jobs = [k for k in log_jobs(ctx, j, a.children) if k.spec["applog"]]
+    if not jobs:
+        raise JmError("%s%s: no `applog` command in the spec (applog = a command that prints the job's own log)" % (
+            j.id, " and its children" if a.children else ""))
+    sec = Sections(a.children, show)
+    procs = []
+    bad = []
+    ended = set()  # follow: commands jm ended because their job had ended
+
+    def start(k):
+        try:
+            p = applog_start(store, ctx.cfg, k, a)
+        except (JmError, OSError) as e:
+            warn("applog of %s: %s" % (k.id, e))
+            bad.append(k.id)
+            return None
+        procs.append((k, p))
+        return p
+    try:
+        if a.follow:
+            # All commands run at once; lines are written as they come, a `==> ID <==` line marking each switch.
+            # As with `jm log -f`, a command is ended once its job has ended and it printed nothing for a second,
+            # so `tail -f` in an applog needs no way to tell when to stop.
+            lines = queue.Queue()
+            heard = {}
+
+            def pump(jid, p):
+                for line in applog_lines(p):
+                    lines.put((jid, line))
+                lines.put((jid, None))
+            for k in jobs:
+                p = start(k)
+                if p is not None:
+                    heard[k.id] = time.monotonic() + 1.0  # quiet counts from its start, plus a second to start up
+                    t = threading.Thread(target=pump, args=(k.id, p))
+                    t.daemon = True
+                    t.start()
+            running = len(procs)
+            checked = 0
+            while running:
+                try:
+                    jid, line = lines.get(timeout=0.2)  # a timeout keeps Ctrl-C working on Windows
+                    if line is None:
+                        running -= 1
+                    else:
+                        heard[jid] = time.monotonic()
+                        sec.write(jid, line)
+                except queue.Empty:
+                    pass
+                now = time.monotonic()
+                if now - checked < 0.5:
+                    continue
+                checked = now
+                for k, p in procs:
+                    if k.id not in ended and p.poll() is None and now - heard.get(k.id, 0) >= 1.0 and \
+                            Job(store, k.id).state in ENDED:
+                        ended.add(k.id)
+                        kill_group(p.pid, hard=True)
+        else:
+            for k in jobs:
+                p = start(k)
+                if p is None:
+                    continue
+                if a.lines is None:
+                    for line in applog_lines(p):
+                        sec.write(k.id, line)
+                else:
+                    sec.write(k.id, "".join(collections.deque(applog_lines(p), maxlen=max(a.lines, 0))))
+                p.wait()
+        for k, p in procs:
+            rc = p.wait()
+            if rc and k.id not in ended:
+                warn("applog of %s exited %d" % (k.id, rc))
+                bad.append(k.id)
+    finally:
+        for k, p in procs:
+            if p.poll() is None:
+                kill_group(p.pid, hard=True)
+    return EXIT_ERR if bad else EXIT_OK
 
 
 def cmd_wait(store, a):
     store.init()
     jid = Ctx(store).need(a.id).id
-    deadline = None if a.timeout is None else time.time() + parse_duration(a.timeout)
+    deadline = None if a.timeout is None else time.monotonic() + parse_duration(a.timeout)
     while True:
         j = Job(store, jid)
         if j.state in ENDED:
@@ -2196,7 +2510,7 @@ def cmd_wait(store, a):
                 rc = int(runs[-2])
             warn("%s %s%s" % (jid, j.state, (": " + j.reason) if j.reason else ""))
             return rc if rc and 0 < rc < 256 else 1
-        if deadline is not None and time.time() >= deadline:
+        if deadline is not None and time.monotonic() >= deadline:
             warn("timeout: %s is still %s" % (jid, j.state))
             return EXIT_ERR
         time.sleep(0.2)
@@ -2556,13 +2870,17 @@ def daemon_start(store, quiet=False):
         if not quiet:
             out(daemon_status_line(store)[1])
         return EXIT_OK
+    try:
+        rotate_log(store.p("daemon.log"), store.config()["log_max"])
+    except JmError:
+        pass
     log = open(store.p("daemon.log"), "ab")
     try:
         p = spawn_detached(jm_argv(store) + ["daemon", "run"], stdout=log, cwd=store.home)
     finally:
         log.close()
-    deadline = time.time() + 15
-    while time.time() < deadline:
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
         if store.daemon_running() and os.path.exists(store.p("daemon.pid")):
             if not quiet:
                 out(daemon_status_line(store)[1])
@@ -2581,8 +2899,8 @@ def daemon_stop(store, quiet=False):
         return EXIT_OK
     write_atomic(store.p("daemon.stop"), utc() + "\n")
     store.wake()
-    deadline = time.time() + 30
-    while time.time() < deadline:
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
         if not store.daemon_running():
             if not quiet:
                 out("daemon: stopped (running jobs keep running)")
@@ -2768,11 +3086,17 @@ def build_parser():
 
     sub.add_parser("free", help="free capacity and queue size")
 
-    lg = sub.add_parser("log", help="a job's log")
-    lg.add_argument("id")
-    lg.add_argument("-f", "--follow", action="store_true")
-    lg.add_argument("-n", "--lines", type=int)
-    lg.add_argument("--raw", action="store_true", help="unmasked (terminal only)")
+    lg = sub.add_parser("log", help="a job's captured stdout + stderr (jm's banners included)")
+    al = sub.add_parser("applog", help="run the job's `applog` command: the log the job keeps itself")
+    for x in (lg, al):
+        x.add_argument("id")
+        x.add_argument("-f", "--follow", action="store_true")
+        x.add_argument("-n", "--lines", type=int)
+        x.add_argument("--raw", action="store_true", help="unmasked (terminal only)")
+        x.add_argument("--children", action="store_true", help="also its children, one `==> ID <==` section each")
+    g = lg.add_mutually_exclusive_group()
+    g.add_argument("--stdout", action="store_true", help="stdout only (without split_stderr the log holds both)")
+    g.add_argument("--stderr", action="store_true", help="stderr only (needs split_stderr = yes in the spec)")
 
     w = sub.add_parser("wait", help="block until the job ends; exit code = the job's")
     w.add_argument("id")
@@ -2834,11 +3158,13 @@ def build_parser():
     sim.add_argument("--trap", action="store_true", help="ignore SIGTERM")
     sim.add_argument("--print-env", action="append", default=[], metavar="NAME")
     sim.add_argument("--out", help="append the --print-env lines to this file instead of stdout")
+    sim.add_argument("--stderr", metavar="TEXT", help="print this line to stderr first")
     return p
 
 
 COMMANDS = {
     "submit": cmd_submit, "list": cmd_list, "status": cmd_status, "free": cmd_free, "log": cmd_log,
+    "applog": cmd_applog,
     "wait": cmd_wait, "move": cmd_move, "swap": cmd_swap, "hold": cmd_hold, "release": cmd_release,
     "stop": cmd_stop, "cancel": cmd_cancel, "restart": cmd_restart, "requeue": cmd_requeue, "set": cmd_set,
     "edit": cmd_edit, "config": cmd_config, "clean": cmd_clean, "artifacts": cmd_artifacts,

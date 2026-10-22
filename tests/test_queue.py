@@ -18,6 +18,7 @@
 # exit codes, service files.
 
 import os
+import subprocess
 import sys
 import unittest
 
@@ -183,6 +184,28 @@ class TestQueueOps(JmTestCase):
                 self.assertIn(n, text, kind)
         self.assertIn("daemon start --quiet", self.jm_ok("daemon", "bashrc"))
         self.assertEqual(self.jm("daemon", "install")[0], 2)
+
+
+@unittest.skipIf(IS_WIN, "the shortcuts are for sh")
+class TestShortcuts(JmTestCase):
+    """examples/jm-shortcuts.sh: short commands on a worker, e.g. from a phone (docs/REMOTE.md sec 3)."""
+    daemon = False
+
+    def test_phone_shortcuts(self):
+        # examples/jm-shortcuts.sh in a plain sh, with `jm` on PATH as on a worker.
+        bindir = os.path.join(self.work, "bin")
+        os.makedirs(bindir)
+        with open(os.path.join(bindir, "jm"), "w") as f:
+            f.write('#!/bin/sh\nexec "%s" "%s" --home "%s" "$@"\n' % (sys.executable, jm.JM_PATH, self.home))
+        os.chmod(os.path.join(bindir, "jm"), 0o755)
+        a = self.submit(None, "--hold", "--name", "n", "--", "sleep", "1")
+        shortcuts = os.path.join(os.path.dirname(jm.JM_PATH), "examples", "jm-shortcuts.sh")
+        p = subprocess.Popen(["sh", "-c", '. "$1"; jl; js; echo "rc=$?"; js %s | head -n 1' % a, "sh", shortcuts],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
+                             env=dict(self.env, PATH=bindir + os.pathsep + self.env["PATH"]))
+        out, err = p.communicate(timeout=60)
+        self.assertEqual(out.splitlines(), ["%s\theld\t" % a, "rc=1", "id: %s" % a])
+        self.assertIn("no running job", err)
 
 
 class TestSecretsSubmit(JmTestCase):

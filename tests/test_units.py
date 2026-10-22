@@ -18,7 +18,9 @@
 # process identity.
 
 import os
+import shutil
 import subprocess
+import tempfile
 import time
 import unittest
 
@@ -45,6 +47,35 @@ class TestDurations(unittest.TestCase):
     def test_utc_round_trip(self):
         t = 1790000000
         self.assertEqual(jm.parse_utc(jm.utc(t)), t)
+
+    def test_elapsed(self):
+        # A stamp from this boot counts on the monotonic clock: the wall-clock time beside it (here years off,
+        # as on a Pi that booted without RTC before NTP set the date) does not matter.
+        info = {}
+        jm.stamp_now(info, "t")
+        self.assertLess(jm.elapsed(info, "t"), 5)
+        if jm.boot_id():
+            info = {"t": "2000-01-01T00:00:00Z", "t_mono": "%s %.3f" % (jm.boot_id(), time.monotonic() - 5)}
+            self.assertAlmostEqual(jm.elapsed(info, "t"), 5, delta=1)
+            info["t_mono"] = "another-boot %.3f" % (time.monotonic() - 5)  # after a reboot: the wall clock
+            self.assertGreater(jm.elapsed(info, "t"), 86400)
+        self.assertIsNone(jm.elapsed({}, "t"))
+        self.assertGreater(jm.elapsed({"t": "2000-01-01T00:00:00Z"}, "t"), 86400)  # old state: wall clock
+
+    @unittest.skipIf(jm.IS_WIN, "logs are trimmed between runs only on Windows")
+    def test_trim_log(self):
+        d = tempfile.mkdtemp(prefix="jm-unit-")
+        try:
+            path = os.path.join(d, "log")
+            with open(path, "wb") as f:
+                f.write(b"x" * 3000)
+            self.assertFalse(jm.trim_log(path, 0.01))  # 10 KB: under the cap
+            self.assertTrue(jm.trim_log(path, 0.002))
+            self.assertEqual(os.path.getsize(path), 0)
+            self.assertEqual(os.path.getsize(path + ".1"), 3000)
+            self.assertFalse(jm.trim_log(path, 0))  # 0 = no limit
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
 
 
 SPEC = """# gso_b top-5 run
@@ -176,6 +207,18 @@ class TestProcessIdentity(unittest.TestCase):
         p.wait()
         self.assertIsNone(jm.proc_start_time(p.pid))
         self.assertFalse(jm.proc_alive(999999999, "1"))
+
+    @unittest.skipIf(jm.IS_WIN, "a Windows process has its own command line from the start")
+    def test_token_after_fork(self):
+        # Right after the fork the child's command line is still its parent's: that miss must not count.
+        pid, st = os.getpid(), jm.proc_start_time(os.getpid())
+        seen = ["python parent", "python parent", "jm _run j1 tokfork"]
+        real = jm.proc_cmdline
+        jm.proc_cmdline = lambda p: seen.pop(0) if len(seen) > 1 else seen[0]
+        try:
+            self.assertTrue(jm.proc_alive(pid, st, "tokfork"))
+        finally:
+            jm.proc_cmdline = real
 
     def test_token(self):
         tok = "tok%d" % int(time.time())

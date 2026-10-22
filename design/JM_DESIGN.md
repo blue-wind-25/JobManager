@@ -76,6 +76,8 @@ STATE/
     runs              one line per start: "<n> <UTC start> <UTC end> <exit> <how: start|resume|restart>"
     events            append-only "<UTC time> <event>" lines (submitted, moved, held, started, ...)
     log               the job's stdout + stderr, appended; a banner line on every (re)start
+    stderr            only with `split_stderr = yes`: the stderr, which then is not in `log` (RDD_011)
+    log.1, stderr.1   the older part once a log passed `log_max` (RDD_013)
 ```
 
 Everything is readable with `cat`, `tail -f` and `grep`. Hand edits are allowed while the daemon is stopped.
@@ -100,6 +102,8 @@ stop        =                            # default: TERM to the process group, K
 stop_grace  = 60                         # seconds
 done_check  = test -s $RUN_DIR/extractor.bin      # exit 0 = already done: skip / mark done, do not run
 progress    = grep 'epoch [0-9]*:' run.log | tail -n 1   # one line shown by `jm status`
+applog      = tail -n ${JM_LINES:-200} ${JM_FOLLOW:+-f} run.log   # the job's own log, for `jm applog`
+split_stderr = no                        # yes: stderr into jobs/<id>/stderr, not into the log (RDD_011)
 
 cpu         = 4                          # cores (float allowed)
 ram         = 2500                       # MB
@@ -123,10 +127,11 @@ note        = restart from epoch 7, RDD_640
 
 Variables available to every command: `JM_ID`, `JM_NAME`, `JM_HOME`, `JM_RUN` (run number), `JM_HOW`
 (start | resume | restart), `JM_PARENT` (parent id or empty), `JM_EXIT` (in `post` / `notify`), `JM_STATE`
-(in `notify`), plus the spec's `env` lines.
+(in `notify` and `applog`), `JM_LINES` / `JM_FOLLOW` (in `applog`: `-n` and `-f` of `jm applog`), plus the spec's
+`env` lines. `applog` runs in the CLI and gets no `env_pass` / `env_file` secrets (RDD_011).
 
 **What else is worth carrying** (proposed, all optional): `gpu` as a token (`tokens = gpu`), `nice` (default 5),
-`log_max` (rotate the log past N MB), `keep` (how long a finished job stays in `jm list`, default 7d),
+`log_max` (cap the log at N MB: default the config's `log_max`, 100; RDD_013), `keep` (how long a finished job stays in `jm list`, default 7d),
 `estimate` (expected duration; only shown, and usable later by a smarter backfill), `tags` (filter in `list`).
 
 Submitting: `jm submit FILE`, `jm submit -` (spec on stdin, handy over ssh), or inline:
@@ -146,6 +151,7 @@ tokens       = bench_jvm:2
 backfill     = yes         # default yes [decided: default on, with the drain guard below]
 drain_after  = 30m         # head job waiting longer than this -> stop backfilling until it starts
 poll         = 5s
+log_max      = 100         # MB per job log and daemon.log; the older part goes to *.1; 0 = no limit (RDD_013)
 ```
 
 Admission, each poll (and on every `wake`):
@@ -213,7 +219,10 @@ jm submit FILE | - | --name N [--cpu C] [--ram MB] [...] -- COMMAND...
           [--parent ID] [--top | --after ID | --end] [--hold]
 jm list [--all] [--tree] [--tag T]             queue order, state, reason, progress line
 jm status [ID]                                 one job: spec summary, runs, live RSS/CPU, last log lines
-jm log ID [-f] [-n N]                          the job's log (follow like tail -f)
+jm log ID [-f] [-n N] [--children] [--stdout | --stderr]
+                                               the job's captured output (follow like tail -f); --children
+                                               adds its children's, one `==> ID <==` section each (RDD_011)
+jm applog ID [-f] [-n N] [--children]          run the spec's `applog`: the log the job keeps itself
 jm wait ID [--timeout T]                       block until the job ends; exit code = the job's
 
 jm move ID --top | --bottom | --up [N] | --down [N] | --before ID2 | --after ID2
@@ -234,7 +243,8 @@ Exit codes: 0 ok, 1 error, 2 usage, 3 no such job, 4 not allowed in that state. 
 (plain text only); every list prints one job per line with tab-separated fields for `cut` / `awk`.
 
 Remote use (the intended way for now **[decided]**): copy files with scp, then `ssh host jm submit spec`,
-`ssh host jm list`, `ssh -t host jm log -f ID`.
+`ssh host jm list`, `ssh -t host jm log -f ID`. What differs over ssh, and short commands from a phone:
+docs/REMOTE.md (RDD_012).
 
 ## 10. Platform notes
 
@@ -425,11 +435,13 @@ Python floor 3.6 matches CentOS 7's base-repo `python3`, so even that box runs i
 3. **Scripts become foreground, resumable commands.** A job's `start` runs the work in the foreground and exits with
    its status; detaching, pid files, waiting for a free machine, chaining and reboot handling all move to jm.
    Every job must be safe to start again (skip finished steps, resume from a snapshot) and should have a
-   `done_check`.
+   `done_check`. Output goes to stdout / stderr (jm keeps it: `jm log`); a job that writes its own log file
+   names it with `applog` (`jm applog`; RDD_011).
 4. **One thin helper per project** to submit from a workstation, e.g. `tools/jm_submit.sh HOST SPEC [key=value ...]`:
    `git pull` on the host, then `jm --host HOST submit` with the overrides (or `ssh host jm submit -` before v3).
 5. **Keep the old scripts until one full cycle has run under jm** (submit, run, reboot in the middle, resume,
-   chained job, result fetched), then delete them in one commit.
+   chained job, logs read over ssh / from the phone, result fetched), then delete them in one commit.
+   docs/PORTING.md is the user-facing checklist; docs/REMOTE.md covers ssh and phone use (RDD_012).
 
 ### 15.2 This repository (HowToTrainYourPetAI), when jm v1 exists
 
@@ -437,19 +449,23 @@ A decision record (RDD) first; it binds the steps below. Then:
 1. **CM5 install:** `~/bin/jm` from a tag; `JM_HOME=/mnt/data/pi/jm` (the root is read-only);
    `config`: `cpus = 4`, `ram = 4000`, `ram_reserve = 500`, `tokens = trainer:1`, `tokens = bench_jvm:2`,
    `tokens = godot:1`, `on_first_start = data-rw.sh`, `on_idle = data-ro.sh`; `jm daemon install systemd` if the
-   read-only root allows a user unit, else the `~/.bashrc` guard (`jm daemon bashrc`).
+   read-only root allows a user unit, else the `~/.bashrc` guard (`jm daemon bashrc`). jm and `JM_HOME` visible
+   to non-interactive ssh (`/usr/local/bin/jm`, or the exports at the top of `~/.bashrc`), and
+   `examples/jm-shortcuts.sh` sourced there for checks from the phone (docs/REMOTE.md).
 2. **Foreground modes** in the CM5 scripts that lack one: `cm5_train_extractor.sh foreground` (the trainer without
    nohup / run.pid), `cm5_post_train.sh run` (exists), `cm5_gso_render.sh` steps, `nx7c.sh` per language
    (train one language, then its gate + export as a child job).
 3. **Specs in `tools/cm5/jobs/`:** extractor training (`tokens = trainer`, `done_check = test -s .../extractor.bin`),
    its V-29 bench (`after = <train job>`, `tokens = bench_jvm:2`), GSO render (`tokens = godot`), the NX-7(c)
    tagger as a group with one child per language (`parallel = 2`, `cpu = 2` each), retries via `jm requeue` +
-   `jm set` instead of `nx7c.sh requeue`.
+   `jm set` instead of `nx7c.sh requeue`. Each spec gets an `applog` printing its run's own log (e.g. the
+   trainer's `run.log`), and the `nohup ... > log` redirections go.
 4. **Retire,** once 15.1 step 5 passes: `cm5_resume_all.sh`, `nx7c_queue_retry.sh`, `cm5_gso_deep_queue.sh`,
    the chain scripts' waiting logic (`cm5_gso_chain.sh`, `cm5_gso_b_chain.sh`), `cm5_post_train.sh queue` /
    `__wait__`, `cm5_gso_b_rescue.sh queue`, and every `busy()` / `STOPPED` / settle-sleep in them.
 5. **PC side:** `tools/cm5/jm_submit.sh` replaces "pull on the CM5, then run the `_run` script" in the hand-offs;
-   status for the owner becomes one command, `ssh pi jm list`.
+   status for the owner becomes one command, `ssh pi jm list`; logs `ssh -t pi jm log -f ID` /
+   `ssh -t pi jm applog -f ID`, or `jl` / `jf` / `ja` in a phone ssh session on the CM5.
 6. **Docs:** `tools/README.md` rows for the specs and the helper, the retired scripts removed; the project's own
    shell ceiling (CentOS 7 `sh`) is unaffected, since jm is Python and lives outside the repository.
 
@@ -478,11 +494,15 @@ coding session whose output is kept. So jm must never hold a secret value, and m
    into the state dir; `jm status` shows the path only.
 4. **Never prints an environment**: no command shows a job's environment; `jm status` lists `env` keys, `env_pass`
    names and `env_file` paths only.
-5. **Masks on display**: `jm log` and the log tail in `jm status` replace any token-prefix match with
+5. **Masks on display**: `jm log`, `jm applog` and the log tail in `jm status` replace any token-prefix match with
    `<prefix>***`; `--raw` shows the log unmasked (refused when stdout is not a terminal, so an agent's captured
    output stays masked). The log file on disk is left as the job wrote it.
 6. **Hooks and notify** (`pre`, `post`, `notify`, `on_first_start`, `on_idle`) get the same environment as the job,
    so a webhook secret goes through `env_pass` / `env_file` too, never inline in the command.
+   **`applog` is the exception**: it runs on demand and its output is printed, so it gets the job's `env` lines
+   but **no** `env_pass` / `env_file` secrets, **and** its output is masked. Both on purpose, because masking
+   alone only catches token-shaped values, not a plain password (owner, 2026-10-22; RDD_011). To be relaxed only
+   if it causes problems; until then an applog that needs a credential reads it itself.
 7. **The repo ships the shell guard** (CLAUDE_GUARDS.md) in its own `.claude/`, so a cloud session working on jm
    is protected even without the owner's user-level settings.
 

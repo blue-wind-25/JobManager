@@ -512,6 +512,95 @@ class TestGroups(JmTestCase):
         self.assertEqual(self.wait_ended(p), "cancelled")
 
 
+class TestLogs(JmTestCase):
+    """`jm log --children / --stdout / --stderr` (split_stderr) and `jm applog` (RDD_011)."""
+
+    def test_split_stderr_and_children(self):
+        self.write("c1.jm", "split_stderr = yes\nstart = %s\n" % sim(0.1, stderr="err-one"))
+        self.write("c2.jm", "start = %s\n" % sim(0.1, stderr="err-two"))
+        path = self.write("g.jm", "children = c1.jm\nchildren = c2.jm\nparallel = 1\n")
+        p, c1, c2 = self.jm_ok("submit", path).split()
+        rc, out, _ = self.jm("log", p, "--children", "-f", timeout=30)
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.state(p), "done")  # -f returns once the group and its children have ended
+        heads = ["==> %s <==" % c1, "==> %s <==" % c2]
+        self.assertEqual([x for x in out.splitlines() if x.startswith("==> ")], heads)  # the group has no output
+        self.assertIn("err-one", self.jobfile(c1, "stderr"))
+        self.assertNotIn("err-one", self.jobfile(c1, "log"))
+        self.assertIn("err-two", self.jobfile(c2, "log"))
+        out = self.jm_ok("log", p, "--children")
+        self.assertEqual([x for x in out.splitlines() if x.startswith("==> ")], heads)
+        self.assertEqual(out.count("sim: finished"), 2)
+        rc, out, err = self.jm("log", p, "--children", "--stderr")
+        self.assertEqual(rc, 0)
+        self.assertIn("err-one", out)
+        self.assertNotIn("sim: finished", out)
+        self.assertIn("%s: split_stderr = no" % c2, err)
+        out = self.jm_ok("log", c1, "--stdout")
+        self.assertIn("sim: finished", out)
+        self.assertNotIn("err-one", out)
+        rc, _, err = self.jm("log", c2, "--stderr")
+        self.assertEqual(rc, 1)
+        self.assertIn("split_stderr = yes", err)
+        self.assertIn("stderr (last 3 lines)", self.jm_ok("status", c1))
+
+
+    @unittest.skipIf(IS_WIN, "logs are trimmed between runs only on Windows")
+    def test_log_max_during_run(self):
+        # ~60 KB over 3 s with log_max = 5 KB: the wrapper trims the log while the job writes it.
+        code = "import time; [print('%05d ' % i + 'x' * 2000, flush=True) or time.sleep(0.1) for i in range(30)]"
+        a = self.submit(spec("%s -c %s" % (q(PY), q(code)), log_max="0.005"))
+        self.assertEqual(self.wait_ended(a), "done")
+        log = self.jobfile(a, "log")
+        self.assertIn("over log_max 0.005 MB", log)
+        self.assertLess(len(log), 30000)
+        self.assertIn("00029 ", self.jobfile(a, "log.1") + log)  # the last line: in the copy or after the cut
+
+
+class TestApplog(JmTestCase):
+    daemon = False
+
+    def test_applog(self):
+        self.start_daemon({"MY_API_TOKEN": "s3cr3t-value"})
+        show = "%s %s _sim --secs 0 --print-env JM_ID --print-env JM_LINES --print-env MY_API_TOKEN" % (q(PY), q(JM))
+        self.write("c.jm", "applog = %s\nstart = %s\n" % (show, sim(0.1)))
+        self.write("plain.jm", "start = %s\n" % sim(0.1))
+        path = self.write("g.jm", "applog = %s\nenv_pass = MY_API_TOKEN\nchildren = c.jm\nchildren = plain.jm\n" % show)
+        p, c, plain = self.jm_ok("submit", path).split()
+        self.assertEqual(self.wait_ended(p), "done")
+        out = self.jm_ok("applog", p)
+        self.assertIn("env JM_ID=%s" % p, out)
+        self.assertIn("env MY_API_TOKEN=<unset>", out)  # env_pass is for the job, never for its applog
+        self.assertNotIn("==> ", out)
+        out = self.jm_ok("applog", p, "--children", "-n", "2")
+        self.assertEqual(out.splitlines(), ["==> %s <==" % p, "env MY_API_TOKEN=<unset>", "sim: finished, exit 0",
+                                            "==> %s <==" % c, "env MY_API_TOKEN=<unset>", "sim: finished, exit 0"])
+        self.assertIn("env JM_LINES=5", self.jm_ok("applog", c, "-n", "5"))
+        # -f on an ended job: a command that is slow to print still gets to, before jm ends it.
+        slow = self.submit(spec(sim(0.1), applog="%s %s _sim --secs 0.5" % (q(PY), q(JM))))
+        self.wait_ended(slow)
+        self.assertIn("sim: finished", self.jm_ok("applog", slow, "-f"))
+        rc, _, err = self.jm("applog", plain)
+        self.assertEqual(rc, 1)
+        self.assertIn("no `applog`", err)
+        bad = self.submit(spec(sim(0.1), applog="%s %s _sim --secs 0 --exit 3" % (q(PY), q(JM))))
+        self.wait_ended(bad)
+        rc, _, err = self.jm("applog", bad)
+        self.assertEqual(rc, 1)
+        self.assertIn("exited 3", err)
+
+    def test_follow_ends_with_the_job(self):
+        # An applog that never ends by itself (think `tail -f`): `-f` ends it once the job has ended.
+        self.start_daemon()
+        a = self.submit(spec(sim(0.5), applog="%s %s _sim --secs 120" % (q(PY), q(JM))))
+        self.wait_state(a, "running")
+        t0 = time.time()
+        rc, _, err = self.jm("applog", a, "-f", timeout=60)
+        self.assertEqual(rc, 0, err)
+        self.assertLess(time.time() - t0, 30)
+        self.assertEqual(self.state(a), "done")
+
+
 class TestSecretsRun(JmTestCase):
     daemon = False
 

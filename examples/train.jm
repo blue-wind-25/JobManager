@@ -7,6 +7,7 @@ start       = sh tools/train.sh foreground
 resume      = sh tools/train.sh foreground --resume
 done_check  = test -s out/extractor.bin
 progress    = tail -n 1 out/train.log
+applog      = tail -n ${JM_LINES:-200} ${JM_FOLLOW:+-f} out/train.log
 stop_grace  = 60
 cpu         = 4
 ram         = 2500

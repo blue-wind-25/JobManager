@@ -14,7 +14,7 @@ on **one machine**: a Raspberry Pi CM5, a Jetson, a Linux box, macOS, Windows.
 - **Sub-jobs**: static groups (`children = FILE`, `parallel = N`) and children a running job submits itself.
 - **Secret-safe**: refuses secrets in specs, passes them by name (`env_pass`, `env_file`), masks tokens in logs.
 
-There is no network port and no web UI: remote use is `ssh host jm ...`.
+There is no network port and no web UI: remote use is `ssh -t host jm ...`, with the same commands.
 
 ## Install
 
@@ -37,6 +37,7 @@ jm list                                                        # id, state, name
 jm status j0001                                                # spec summary, runs, live RSS/CPU, log tail
 jm log -f j0001
 jm wait j0001; echo $?                                         # exit code = the job's
+ssh -t pi jm log -f j0001                                      # any command, on worker `pi` (docs/REMOTE.md)
 ```
 
 A spec (`examples/train.jm`):
@@ -49,6 +50,7 @@ start       = sh tools/train.sh foreground
 resume      = sh tools/train.sh foreground --resume
 done_check  = test -s out/extractor.bin       # exit 0 = already done: skip, mark done
 progress    = tail -n 1 out/train.log
+applog      = tail -n ${JM_LINES:-200} ${JM_FOLLOW:+-f} out/train.log   # `jm applog ID`
 cpu         = 4
 ram         = 2500
 tokens      = gpu
@@ -62,7 +64,9 @@ Every key is described in [design/JM_DESIGN.md](design/JM_DESIGN.md) sec 5 (spec
 
 - [docs/GUIDE.md](docs/GUIDE.md): how jm behaves - job states, `start` / `resume` / `restart`, retries, groups
   and what happens when a child fails, stopping (and Windows), the `on_first_start` / `on_idle` machine hooks
-  (read-only data mounts), secrets.
+  (read-only data mounts), secrets, logs (`jm log` / `jm applog`).
+- [docs/REMOTE.md](docs/REMOTE.md): driving workers over ssh from a workstation (`ssh -t pi jm ...`, what differs)
+  or a phone (two-letter shortcuts, [examples/jm-shortcuts.sh](examples/jm-shortcuts.sh)).
 - [docs/PORTING.md](docs/PORTING.md): moving a project's own queue / resume / waiter scripts to jm.
 
 ## Commands
@@ -75,7 +79,8 @@ Every key is described in [design/JM_DESIGN.md](design/JM_DESIGN.md) sec 5 (spec
 | `jm submit FILE \| - \| [opts] -- CMD...` | `--name --cpu --ram --disk --tokens --env --dep --set k=v --parent ID --top --after ID --end --hold --continue-on-fail` |
 | `jm list [--all] [--tree] [--tag T]` | queue order, then recently finished jobs |
 | `jm status [ID]` / `jm free` | one job / the daemon and free capacity |
-| `jm log ID [-f] [-n N] [--raw]` | the log, secrets masked (`--raw` needs a terminal) |
+| `jm log ID [-f] [-n N] [--children] [--stdout\|--stderr] [--raw]` | captured stdout + stderr, secrets masked (`--raw` needs a terminal); `--children` adds the children's, one section each |
+| `jm applog ID [-f] [-n N] [--children] [--raw]` | runs the spec's `applog` command: the log the job keeps itself |
 | `jm wait ID [--timeout T]` | block until it ends |
 | `jm move ID --top\|--bottom\|--up N\|--down N\|--before ID2\|--after ID2`, `jm move --by-priority`, `jm swap A B` | reorder |
 | `jm hold ID` / `jm release ID` | park / unpark |
@@ -88,14 +93,15 @@ Exit codes: 0 ok, 1 error, 2 usage, 3 no such job, 4 not allowed in that state.
 
 Variables every job command sees: `JM_ID`, `JM_NAME`, `JM_HOME`, `JM_RUN`, `JM_HOW` (start / resume / restart),
 `JM_PARENT`, `JM_JM` (the command that runs jm, for `$JM_JM submit --parent "$JM_ID" ...`), plus `JM_EXIT` in
-`post` / `notify` and `JM_STATE` in `notify`.
+`post` / `notify`, `JM_STATE` in `notify` / `applog`, and `JM_LINES` / `JM_FOLLOW` in `applog`.
 
 ## Secrets
 
 jm never stores a secret: a spec whose `env` names a secret (`..._TOKEN`, `..._PASSWORD`, ...) or holds a
 token-like value is refused. Pass secrets by name instead - `env_pass = NAME` (taken from the daemon's
 environment at each start) or `env_file = /path/0600-file` - and they are kept out of every job that does not ask
-for them. See design/JM_DESIGN.md sec 16.
+for them. `jm log`, `jm applog` and `jm status` mask token-like strings, and `applog` commands get no
+secrets at all. See design/JM_DESIGN.md sec 16.
 
 ## Repository layout
 
@@ -103,9 +109,9 @@ for them. See design/JM_DESIGN.md sec 16.
 |---|---|
 | `jm.py` | the whole tool |
 | `tests/` | `python3 -m unittest discover tests` (unit tests and daemon tests with `jm _sim` fake jobs) |
-| `examples/` | sample specs |
+| `examples/` | sample specs; `jm-shortcuts.sh` (short commands on a worker, e.g. from a phone) |
 | `guards/` | claude-guards: Claude Code safety hooks (secret echo, broad search, protected files), installed into `.claude/` |
-| `docs/` | user documentation: `GUIDE.md`, `PORTING.md` |
+| `docs/` | user documentation: `GUIDE.md`, `REMOTE.md`, `PORTING.md` |
 | `design/` | design notes: `JM_DESIGN.md`, `CLAUDE_GUARDS.md` |
 | `rdd/` | resolved design decisions taken while building |
 | `state/` | implementation state: what is built, tested, next |
