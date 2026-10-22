@@ -80,22 +80,20 @@ On a read-only root, put the state dir on the writable mount: `JM_HOME=/mnt/data
 
 ## 5. A thin helper to submit from a workstation
 
-`jm -H HOST` already runs any jm command on a worker ([REMOTE.md](REMOTE.md)): `jm -H pi submit jobs/train.jm`
-sends the local spec, so a helper is only needed for project steps around the submit, e.g.
-`tools/jm_submit.sh HOST SPEC [key=value ...]`:
+One small script per project, e.g. `tools/jm_submit.sh HOST SPEC [key=value ...]`:
 
 ```sh
 #!/bin/sh
 # Submit a committed spec on HOST after pulling the project there.
 set -eu
 host=$1; spec=$2; shift 2
-ssh "$host" "cd /mnt/data/project && git pull -q"
 sets=""; for kv in "$@"; do sets="$sets --set $kv"; done
-jm -H "$host" submit "$spec" $sets
+ssh "$host" "cd /mnt/data/project && git pull -q && jm submit $spec $sets"
 ```
 
-Status for the owner becomes `jm -H pi list` (or `jp list` with `alias jp='jm -H pi'`); logs `jp log -f ID`
-(what the job printed) and `jp applog -f ID` (the log it writes itself), with `--children` for a whole group.
+Status for the owner becomes `ssh pi jm list` (or `jp list` with `alias jp='ssh -t pi jm'`); logs
+`jp log -f ID` (what the job printed) and `jp applog -f ID` (the log it writes itself), with `--children` for a
+whole group. See [REMOTE.md](REMOTE.md) for what differs over ssh, and for checking jobs from a phone.
 
 ## 6. Switch over safely
 

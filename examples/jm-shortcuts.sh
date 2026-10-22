@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Short jm commands for an interactive shell on a worker, e.g. from a phone (docs/REMOTE.md sec 4).
+# Short jm commands for an interactive shell on a worker, e.g. from a phone (docs/REMOTE.md sec 3).
 # Copy next to jm and source it from ~/.bashrc (bash, zsh, dash and busybox sh all work):
 #     . ~/bin/jm-shortcuts.sh
 #

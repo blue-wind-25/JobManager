@@ -2760,107 +2760,6 @@ def cmd_artifacts(store, a):
     return EXIT_OK
 
 
-# remote use: `jm -H HOST <command>` runs the command on HOST over ssh (design sec 12.4, RDD_012) ---------------
-
-def split_host(argv):
-    """Takes `-H HOST` / `--host HOST` from the global options (before the command): (host or None, the rest)."""
-    rest = []
-    i = 0
-    while i < len(argv):
-        x = argv[i]
-        if x in ("-H", "--host") and i + 1 < len(argv):
-            return argv[i + 1], rest + argv[i + 2:]
-        if x.startswith("--host="):
-            return x[7:], rest + argv[i + 1:]
-        if not x.startswith("-"):
-            break  # the command: its own options are not jm's global ones
-        rest.append(x)
-        if x == "--home" and i + 1 < len(argv):
-            rest.append(argv[i + 1])
-            i += 1
-        i += 1
-    return None, argv
-
-
-def read_hosts(path):
-    """`hosts`: `NAME SSH_TARGET [JM [JM_HOME]]` per line; `-` keeps a column's default."""
-    hosts = {}
-    for line in read_text(path).splitlines():
-        f = strip_comment(line).split()
-        if len(f) >= 2:
-            hosts[f[0]] = (f[1], f[2] if len(f) > 2 and f[2] != "-" else "jm", f[3] if len(f) > 3 else None)
-    return hosts
-
-
-def remote_word(w):
-    """Quote one word for the host's sh, keeping a leading `~/` (and `$HOME/`) for it to expand."""
-    for lead in ("~/", "$HOME/"):
-        if w.startswith(lead):
-            return lead + shlex.quote(w[len(lead):])
-    return shlex.quote(w)
-
-
-def remote_plan(host, rest, hosts_path, interactive):
-    """(ssh argv, local spec file to send on stdin or None) for `jm -H host <rest>`."""
-    target, jm, home = read_hosts(hosts_path).get(host, (host, "jm", None))
-    rest = list(rest)
-    cmd_at = next((i for i, x in enumerate(rest) if not x.startswith("-") and (i == 0 or rest[i - 1] != "--home")),
-                  None)
-    cmd = rest[cmd_at] if cmd_at is not None else None
-    spec_file = None
-    stdin_spec = False
-    if cmd == "submit":
-        # A spec file given by its local path is sent on stdin (`submit -`): nothing to copy. A group's
-        # `children` files are read where the spec is, so a group spec must be on the host (path as there).
-        k = cmd_at + 1
-        while k < len(rest) and rest[k] != "--":
-            x = rest[k]
-            if x.startswith("-") and x != "-":
-                k += 1 if x in SUBMIT_FLAGS or "=" in x else 2
-                continue
-            stdin_spec = x == "-"
-            if x != "-" and os.path.isfile(x):
-                spec = parse_spec(read_text(x), x)
-                if spec["children"]:
-                    warn("%s is a group: its children files are read on %s, so `%s` is passed as a path there" % (
-                        x, host, x))
-                else:
-                    spec_file = x
-                    stdin_spec = True
-                    rest[k] = "-"
-            break
-    ssh = shlex.split(os.environ.get("JM_SSH") or "ssh")
-    # -t only for a person at a terminal: it gives Ctrl-C, prompts, $EDITOR and --raw to the remote command, but
-    # it would merge stderr into stdout and turn \n into \r\n for a script, and it needs stdin.
-    tty = interactive and not stdin_spec
-    opts = ["-t"] if tty else ["-o", "BatchMode=yes"]
-    words = [jm] + (["--home", remote_word(home)] if home and "--home" not in rest[:cmd_at] else [])
-    words += [remote_word(x) for x in rest]
-    return ssh + opts + [target, " ".join(words)], spec_file
-
-
-SUBMIT_FLAGS = ("--hold", "--continue-on-fail", "--top", "--end")  # submit options that take no value
-
-
-def remote_main(host, rest):
-    interactive = sys.stdin.isatty() and sys.stdout.isatty()
-    argv, spec_file = remote_plan(host, rest, os.path.join(default_home(), "hosts"), interactive)
-    try:
-        if spec_file:
-            with open(spec_file, "rb") as f:
-                rc = subprocess.call(argv, stdin=f)
-        else:
-            rc = subprocess.call(argv)
-    except OSError as e:
-        raise JmError("cannot run %s: %s" % (argv[0], e))
-    if rc == 255:
-        warn("ssh to %s failed (exit 255)" % host)
-    elif rc == 127:
-        warn("`%s` not found on %s: ssh commands do not read ~/.bashrc, so give jm's full path in the hosts file "
-             "(%s: NAME TARGET /path/to/jm)" % (argv[-1].split()[0], host, os.path.join(default_home(), "hosts")))
-    return rc
-
-
 # daemon management ---------------------------------------------------------------------------------------------
 
 def jm_argv(store):
@@ -3042,7 +2941,6 @@ class Parser(argparse.ArgumentParser):
 def build_parser():
     p = Parser(prog="jm", description="jm - a single-machine job manager")
     p.add_argument("--home", help="state dir (default: $JM_HOME or ~/.jm)")
-    p.add_argument("-H", "--host", help="run the command on HOST over ssh (a name in ~/.jm/hosts, or an ssh target)")
     p.add_argument("--version", action="version", version="jm " + VERSION)
     sub = p.add_subparsers(dest="cmd", parser_class=Parser)
 
@@ -3175,9 +3073,6 @@ COMMANDS = {
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     try:
-        host, rest = split_host(argv)
-        if host:
-            return remote_main(host, rest)
         # `submit ... -- COMMAND`: argparse cannot mix REMAINDER with options, so split at the first `--`.
         command = None
         if "submit" in argv and "--" in argv and argv.index("--") > argv.index("submit"):

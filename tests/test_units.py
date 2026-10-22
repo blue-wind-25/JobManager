@@ -18,9 +18,7 @@
 # process identity.
 
 import os
-import shutil
 import subprocess
-import tempfile
 import time
 import unittest
 
@@ -210,34 +208,6 @@ class TestMisc(unittest.TestCase):
     def test_version(self):
         out = subprocess.check_output([PY, jm.JM_PATH, "--version"], universal_newlines=True)
         self.assertIn(jm.VERSION, out)
-
-    def test_split_host(self):
-        self.assertEqual(jm.split_host(["-H", "pi", "log", "-f", "j1"]), ("pi", ["log", "-f", "j1"]))
-        self.assertEqual(jm.split_host(["--home", "h", "--host=pi", "list"]), ("pi", ["--home", "h", "list"]))
-        self.assertEqual(jm.split_host(["log", "-H", "x"]), (None, ["log", "-H", "x"]))  # after the command: not ours
-
-    def test_remote_plan(self):
-        d = os.path.realpath(tempfile.mkdtemp(prefix="jm-unit-"))
-        try:
-            hosts = os.path.join(d, "hosts")
-            with open(hosts, "w") as f:
-                f.write("pi  pi@10.0.0.5  ~/bin/jm  /mnt/data/jm   # the CM5\nw2 me@w2 -\n")
-            spec = os.path.join(d, "s.jm")
-            with open(spec, "w") as f:
-                f.write("start = sleep 1\n")
-            argv, sent = jm.remote_plan("pi", ["log", "-f", "j1"], hosts, True)
-            self.assertEqual(argv[-3:], ["-t", "pi@10.0.0.5", "~/bin/jm --home /mnt/data/jm log -f j1"])
-            self.assertIsNone(sent)
-            argv, _ = jm.remote_plan("pi", ["list"], hosts, False)  # a script: no -t, never a password prompt
-            self.assertEqual(argv[1:3], ["-o", "BatchMode=yes"])
-            argv, sent = jm.remote_plan("w2", ["submit", "--name", "a b", spec, "--top"], hosts, True)
-            self.assertEqual(argv[-1], "jm submit --name 'a b' - --top")  # the local spec goes on stdin
-            self.assertEqual(sent, spec)
-            self.assertNotIn("-t", argv)
-            argv, _ = jm.remote_plan("10.0.0.9", ["submit", "--", "sh", "-c", "echo $HOME; ls"], hosts, True)
-            self.assertEqual(argv[-2:], ["10.0.0.9", "jm submit -- sh -c 'echo $HOME; ls'"])
-        finally:
-            shutil.rmtree(d, ignore_errors=True)
 
     def test_usage_exit(self):
         p = subprocess.Popen([PY, jm.JM_PATH, "frobnicate"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)

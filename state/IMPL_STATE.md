@@ -8,11 +8,11 @@ Last update: 2026-10-22.
 | jm v1 - design/JM_DESIGN.md sec 1-11 | done | RDD_002 .. RDD_008 |
 | jm secrets - sec 16 | done | RDD_005 |
 | jm logs: `jm log --children / --stdout / --stderr` (`split_stderr`), `applog` and `jm applog` | done; tested on Linux, CI matrix not run yet | RDD_011 |
-| `jm -H HOST` (remote part of sec 12.4), docs/REMOTE.md; phone shortcuts `examples/jm-shortcuts.sh` | done; tested with a fake ssh (Unix), shortcuts by hand in dash and bash; CI matrix not run yet | RDD_012 |
+| docs/REMOTE.md (ssh use, phone); `examples/jm-shortcuts.sh` | done; shortcuts tested in sh (CI: also busybox on Alpine) | RDD_012 (no `jm --host` in v1) |
 | jm tests and CI - sec 12.5 | done; full CI matrix green (PR #2) | see below |
 | claude-guards - design/CLAUDE_GUARDS.md sec 2-5, 7 | done (in `guards/`, installed in `.claude/`) | RDD_009 |
 | jm v2 - sec 12.1 estimates / EASY backfill, sec 12.2 progress parsing and ETA | not started | `progress` samples are already stored in the v2 format |
-| jm v3 - sec 12.3 several users, sec 12.4 several machines (`jm free` and `jm -H HOST` already exist, RDD_012) | not started | |
+| jm v3 - sec 12.3 several users, sec 12.4 several machines (`jm free` already exists) | not started | |
 | claude-guards in its own repository; adoption in HowToTrainYourPetAI (CLAUDE_GUARDS.md sec 6) | not started | `guards/` moves out as is |
 | Dogfooding on the CM5 (JM_DESIGN.md sec 15.2) | not started | needs a v1.0.0 tag first |
 
@@ -43,8 +43,7 @@ plain-text hand-edit round trip; secrets: refused names and values in `env` line
 while other secrets do not, `env_file` mode check, log masking, `--raw` refused without a terminal; service files;
 on_first_start / on_idle hooks; pause / cont; progress sampling and `jm status` live usage; logs (RDD_011):
 `jm log --children` (plain and `-f`), `split_stderr` with `--stdout / --stderr`, `jm applog` (group and
-`--children`, `-n`, `JM_LINES`, no `env_pass` secret, a failing applog, `-f` ending with the job); `jm -H`
-(the ssh command line built, `-t` / BatchMode, a local spec on stdin, quoting, exit codes through a fake ssh).
+`--children`, `-n`, `JM_LINES`, no `env_pass` secret, a failing applog, `-f` ending with the job); the phone shortcuts (`examples/jm-shortcuts.sh`) in sh.
 
 ## Known limits
 
