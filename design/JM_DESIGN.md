@@ -76,6 +76,7 @@ STATE/
     runs              one line per start: "<n> <UTC start> <UTC end> <exit> <how: start|resume|restart>"
     events            append-only "<UTC time> <event>" lines (submitted, moved, held, started, ...)
     log               the job's stdout + stderr, appended; a banner line on every (re)start
+    stderr            only with `split_stderr = yes`: the stderr, which then is not in `log` (RDD_011)
 ```
 
 Everything is readable with `cat`, `tail -f` and `grep`. Hand edits are allowed while the daemon is stopped.
@@ -100,6 +101,8 @@ stop        =                            # default: TERM to the process group, K
 stop_grace  = 60                         # seconds
 done_check  = test -s $RUN_DIR/extractor.bin      # exit 0 = already done: skip / mark done, do not run
 progress    = grep 'epoch [0-9]*:' run.log | tail -n 1   # one line shown by `jm status`
+applog      = tail -n ${JM_LINES:-200} ${JM_FOLLOW:+-f} run.log   # the job's own log, for `jm applog`
+split_stderr = no                        # yes: stderr into jobs/<id>/stderr, not into the log (RDD_011)
 
 cpu         = 4                          # cores (float allowed)
 ram         = 2500                       # MB
@@ -123,7 +126,8 @@ note        = restart from epoch 7, RDD_640
 
 Variables available to every command: `JM_ID`, `JM_NAME`, `JM_HOME`, `JM_RUN` (run number), `JM_HOW`
 (start | resume | restart), `JM_PARENT` (parent id or empty), `JM_EXIT` (in `post` / `notify`), `JM_STATE`
-(in `notify`), plus the spec's `env` lines.
+(in `notify` and `applog`), `JM_LINES` / `JM_FOLLOW` (in `applog`: `-n` and `-f` of `jm applog`), plus the spec's
+`env` lines. `applog` runs in the CLI and gets no `env_pass` / `env_file` secrets (RDD_011).
 
 **What else is worth carrying** (proposed, all optional): `gpu` as a token (`tokens = gpu`), `nice` (default 5),
 `log_max` (rotate the log past N MB), `keep` (how long a finished job stays in `jm list`, default 7d),
@@ -213,7 +217,10 @@ jm submit FILE | - | --name N [--cpu C] [--ram MB] [...] -- COMMAND...
           [--parent ID] [--top | --after ID | --end] [--hold]
 jm list [--all] [--tree] [--tag T]             queue order, state, reason, progress line
 jm status [ID]                                 one job: spec summary, runs, live RSS/CPU, last log lines
-jm log ID [-f] [-n N]                          the job's log (follow like tail -f)
+jm log ID [-f] [-n N] [--children] [--stdout | --stderr]
+                                               the job's captured output (follow like tail -f); --children
+                                               adds its children's, one `==> ID <==` section each (RDD_011)
+jm applog ID [-f] [-n N] [--children]          run the spec's `applog`: the log the job keeps itself
 jm wait ID [--timeout T]                       block until the job ends; exit code = the job's
 
 jm move ID --top | --bottom | --up [N] | --down [N] | --before ID2 | --after ID2

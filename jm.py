@@ -25,7 +25,10 @@ See design/JM_DESIGN.md in the repository for the full design.
 
 import argparse
 import calendar
+import codecs
+import collections
 import os
+import queue
 import re
 import secrets
 import shlex
@@ -34,6 +37,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import traceback
 
@@ -525,7 +529,7 @@ SPEC_KEYS = [
     ("id", "str", None), ("name", "str", None), ("cwd", "str", None), ("note", "str", None),
     ("env", "env", None), ("env_pass", "list", None), ("env_file", "list", None),
     ("start", "cmd", None), ("resume", "cmd", None), ("stop", "cmd", None), ("stop_grace", "dur", 60.0),
-    ("done_check", "cmd", None), ("progress", "cmd", None),
+    ("done_check", "cmd", None), ("progress", "cmd", None), ("applog", "cmd", None), ("split_stderr", "bool", False),
     ("pre", "cmd", None), ("post", "cmd", None), ("notify", "cmd", None),
     ("cpu", "num", 1.0), ("ram", "num", 0.0), ("disk", "disk", None), ("tokens", "tokens", None),
     ("after", "list", None), ("after_ok", "bool", True), ("priority", "int", 0), ("retries", "int", 0),
@@ -1664,8 +1668,8 @@ def daemon_run(store, quiet=False):
 # The per-job wrapper: `jm _run ID TOKEN` (design sec 3)
 # ---------------------------------------------------------------------------------------------------------------
 
-def popen_shell(cmd, env, cwd, log, nice=0):
-    kw = dict(shell=True, env=env, cwd=cwd, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT)
+def popen_shell(cmd, env, cwd, log, nice=0, err=None):
+    kw = dict(shell=True, env=env, cwd=cwd, stdin=subprocess.DEVNULL, stdout=log, stderr=err or subprocess.STDOUT)
     if IS_WIN:
         kw["creationflags"] = CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW | \
             (BELOW_NORMAL_PRIORITY_CLASS if nice > 0 else 0)
@@ -1699,14 +1703,18 @@ def wrapper_body(store, jid, token):
     spec = j.spec
     run = j.info.get("run", "1")
     how = j.info.get("how", "start")
-    logp = j.path("log")
-    if spec["log_max"] and os.path.exists(logp) and os.path.getsize(logp) > spec["log_max"] * 1048576:
-        os.replace(logp, logp + ".1")
-    log = open(logp, "ab")
+    paths = [j.path("log")] + ([j.path("stderr")] if spec["split_stderr"] else [])
+    for logp in paths:
+        if spec["log_max"] and os.path.exists(logp) and os.path.getsize(logp) > spec["log_max"] * 1048576:
+            os.replace(logp, logp + ".1")
+    log = open(paths[0], "ab")
+    err = open(paths[1], "ab") if len(paths) > 1 else None  # split_stderr: every command's stderr goes here
 
     def say(msg):
-        log.write(("==== jm %s run %s (%s): %s ====\n" % (jid, run, how, msg)).encode("utf-8"))
-        log.flush()
+        # The banner goes into both files, so the runs in `stderr` can be told apart too.
+        for f in (log, err) if err else (log,):
+            f.write(("==== jm %s run %s (%s): %s ====\n" % (jid, run, how, msg)).encode("utf-8"))
+            f.flush()
 
     def finish(rc, note=""):
         say("ended %s, exit %d%s" % (utc(), rc, (" (%s)" % note) if note else ""))
@@ -1727,7 +1735,7 @@ def wrapper_body(store, jid, token):
 
     def watch(cmd, group_nice=0):
         """Run one command and wait for it, honouring a stop request (stop_req). Returns (rc, stopped)."""
-        child = popen_shell(cmd, env, cwd, log, group_nice)
+        child = popen_shell(cmd, env, cwd, log, group_nice, err)
         write_atomic(j.path("child"), "%d %s\n" % (child.pid, proc_start_time(child.pid) or "?"))
         stopping = False
         hard_at = None
@@ -1745,7 +1753,7 @@ def wrapper_body(store, jid, token):
                         e2 = dict(env)
                         e2["JM_PID"] = str(child.pid)
                         subprocess.Popen(spec["stop"], shell=True, env=e2, cwd=cwd, stdin=subprocess.DEVNULL,
-                                         stdout=log, stderr=subprocess.STDOUT)
+                                         stdout=log, stderr=err or subprocess.STDOUT)
                     except OSError as e:
                         say("stop command failed: %s" % e)
                         kill_group(child.pid)
@@ -1788,7 +1796,7 @@ def wrapper_body(store, jid, token):
     if spec["post"]:
         env["JM_EXIT"] = str(rc)
         try:
-            p = popen_shell(spec["post"], env, cwd, log)
+            p = popen_shell(spec["post"], env, cwd, log, err=err)
             p.wait()
         except OSError as e:
             say("post failed: %s" % e)
@@ -1802,6 +1810,9 @@ def wrapper_body(store, jid, token):
 def sim_main(a):
     if a.trap and not IS_WIN:
         signal.signal(signal.SIGTERM, lambda *x: sys.stdout.write("sim: ignoring TERM\n") or sys.stdout.flush())
+    if a.stderr:
+        sys.stderr.write(a.stderr + "\n")
+        sys.stderr.flush()
     for name in a.print_env:
         line = "env %s=%s" % (name, os.environ.get(name, "<unset>"))
         if a.out:
@@ -2090,6 +2101,8 @@ def cmd_status(store, a):
     out("start: %s" % mask_secrets(s["start"] or "-", ctx.cfg))
     if s["resume"]:
         out("resume: %s" % mask_secrets(s["resume"], ctx.cfg))
+    if s["applog"]:
+        out("applog: %s" % mask_secrets(s["applog"], ctx.cfg))
     env_bits = []
     if s["env"]:
         env_bits.append("env " + " ".join(k for k, _ in s["env"]))
@@ -2128,56 +2141,259 @@ def cmd_status(store, a):
         out("progress: %s" % prog)
     if IS_WIN and s["env_file"]:
         out("warning: env_file permissions are not checked on Windows")
-    tail = read_text(j.path("log")).splitlines()[-a.lines:] if a.lines else []
-    if tail:
-        out("log (last %d lines):" % len(tail))
-        for line in tail:
-            out("  " + mask_secrets(line, ctx.cfg))
+    for name in ("log", "stderr") if s["split_stderr"] else ("log",):
+        tail = read_text(j.path(name)).splitlines()[-a.lines:] if a.lines else []
+        if tail:
+            out("%s (last %d lines):" % (name, len(tail)))
+            for line in tail:
+                out("  " + mask_secrets(line, ctx.cfg))
     return EXIT_OK
+
+
+# logs: `jm log` (what jm captured) and `jm applog` (what the job's own `applog` command prints) ---------------
+
+def log_jobs(ctx, j, with_children):
+    """The job, then with --children its descendants, depth first."""
+    return [j] + ([ctx.job(c) for c in ctx.descendants(j.id)] if with_children else [])
+
+
+def log_show(a, cfg):
+    if a.raw and not sys.stdout.isatty():
+        raise JmError("--raw shows unmasked secrets and needs a terminal; refused for captured output",
+                      EXIT_STATE)
+    return (lambda s: s) if a.raw else (lambda s: mask_secrets(s, cfg))
+
+
+class Sections(object):
+    """Writes several jobs' output with a `==> ID <==` line whenever the job changes (as `tail` does for several
+    files); with one job and no --children, the output is written as is."""
+
+    def __init__(self, multi, show):
+        self.multi = multi
+        self.show = show
+        self.last = None
+
+    def write(self, jid, text):
+        if not text:
+            return
+        if self.multi:
+            if jid != self.last:
+                sys.stdout.write("==> %s <==\n" % jid)
+            if not text.endswith("\n"):
+                text += "\n"  # the next section must start on its own line
+        self.last = jid
+        sys.stdout.write(self.show(text.replace("\r\n", "\n")))
+        sys.stdout.flush()
+
+
+def log_files(ctx, j, a, warned):
+    """(id, path) of the files `jm log` shows. Without split_stderr a job has no separate stderr: both streams
+    are in its `log`, so --stderr skips it and --stdout says so (once per job; a lone job --stderr is an error)."""
+    files = []
+    for k in log_jobs(ctx, j, a.children):
+        split = k.spec["split_stderr"]
+        if (a.stdout or (a.stderr and a.children)) and not split and k.id not in warned:
+            warned.add(k.id)
+            warn("%s: split_stderr = no: stdout and stderr are both in its log%s" % (
+                k.id, "; skipped" if a.stderr else ""))
+        if a.stderr and not split:
+            continue
+        files.append((k.id, k.path("stderr" if a.stderr else "log")))
+    return files
+
+
+def new_decoder():
+    return codecs.getincrementaldecoder("utf-8")("replace")
 
 
 def cmd_log(store, a):
     store.init()
-    j = Ctx(store).need(a.id)
-    cfg = store.config()
-    if a.raw and not sys.stdout.isatty():
-        raise JmError("--raw shows unmasked secrets and needs a terminal; refused for captured output",
-                      EXIT_STATE)
-    show = (lambda s: s) if a.raw else (lambda s: mask_secrets(s, cfg))
-    path = j.path("log")
-    text = read_text(path)
-    lines = text.splitlines(True)
-    if a.lines is not None:
-        lines = lines[-a.lines:] if a.lines > 0 else []
-    sys.stdout.write(show("".join(lines)))
-    sys.stdout.flush()
-    if not a.follow:
-        return EXIT_OK
-    pos = len(text.encode("utf-8"))
-    partial = ""
-    idle = 0
-    while True:
+    ctx = Ctx(store)
+    j = ctx.need(a.id)
+    show = log_show(a, ctx.cfg)
+    warned = set()
+    files = log_files(ctx, j, a, warned)
+    if a.stderr and not files:
+        raise JmError("%s: no separate stderr (spec: split_stderr = yes); `jm log %s` shows both streams" % (
+            j.id, j.id))
+    sec = Sections(a.children, show)
+    # Positions are byte offsets in the file (a text-mode read would count \r\n as one on Windows).
+    pos = {}
+    decoders = {}
+    partial = {}
+    for jid, path in files:
         try:
             with open(path, "rb") as f:
-                f.seek(pos)
-                chunk = f.read()
+                data = f.read()
         except (IOError, OSError):
-            chunk = b""
-        if chunk:
-            pos += len(chunk)
+            data = b""
+        pos[path] = len(data)
+        decoders[path] = new_decoder()
+        text = decoders[path].decode(data)
+        partial[path] = ""
+        if a.follow and not text.endswith("\n"):
+            # Hold back an unfinished last line: it is written once complete, in one piece.
+            text, partial[path] = text.rsplit("\n", 1) if "\n" in text else ("", text)
+            text = text + "\n" if text else ""
+        lines = text.splitlines(True)
+        if a.lines is not None:
+            lines = lines[-a.lines:] if a.lines > 0 else []
+        sec.write(jid, "".join(lines))
+    if not a.follow:
+        return EXIT_OK
+    idle = 0
+    while True:
+        if a.children:
+            files = log_files(Ctx(store), j, a, warned)  # a running group may have new children
+        got = False
+        for jid, path in files:
+            try:
+                size = os.path.getsize(path)
+                if path not in pos or size < pos[path]:  # a new child, or rotated (log_max) at a new run
+                    pos[path] = 0
+                    decoders[path] = new_decoder()
+                    partial[path] = ""
+                if size == pos[path]:
+                    continue
+                with open(path, "rb") as f:
+                    f.seek(pos[path])
+                    chunk = f.read()
+            except (IOError, OSError):
+                continue
+            pos[path] += len(chunk)
+            got = True
+            buf = partial[path] + decoders[path].decode(chunk)
+            if "\n" in buf:
+                done, buf = buf.rsplit("\n", 1)
+                sec.write(jid, done + "\n")
+            partial[path] = buf
+        if got:
             idle = 0
-            partial += chunk.decode("utf-8", "replace")
-            if "\n" in partial:
-                done, partial = partial.rsplit("\n", 1)
-                sys.stdout.write(show(done + "\n"))
-                sys.stdout.flush()
         else:
             idle += 1
-            if idle >= 5 and Job(store, j.id).state in ENDED:
-                if partial:
-                    sys.stdout.write(show(partial))
+            if idle >= 5 and all(Job(store, jid).state in ENDED for jid, _ in files):
+                for jid, path in files:
+                    sec.write(jid, partial.get(path, ""))
                 return EXIT_OK
         time.sleep(0.2)
+
+
+def applog_env(store, cfg, j, a):
+    """The job's `env` lines and JM_* variables, but no env_pass / env_file: an applog's output is printed, often
+    into a captured session, so it gets no secret it could print (design sec 16)."""
+    env = base_env(cfg)
+    for k, v in j.spec["env"]:
+        env[k] = expand_vars(v, env)
+    env.update({"JM_ID": j.id, "JM_NAME": j.name(), "JM_HOME": store.home, "JM_RUN": j.info.get("run", "0"),
+                "JM_HOW": j.info.get("how", "start"), "JM_PARENT": j.parent or "", "JM_STATE": j.state,
+                "JM_JM": shell_join([sys.executable, JM_PATH]),
+                "JM_LINES": "" if a.lines is None else str(max(a.lines, 0)), "JM_FOLLOW": "1" if a.follow else ""})
+    return env
+
+
+def applog_start(store, cfg, j, a):
+    cwd = job_cwd(store, j)
+    if not os.path.isdir(cwd):
+        raise JmError("cwd %s does not exist" % cwd)
+    # Its own process group, so a `tail -f` started by the shell goes too when jm ends it (Ctrl-C, closed pipe).
+    kw = dict(shell=True, env=applog_env(store, cfg, j, a), cwd=cwd, stdin=subprocess.DEVNULL,
+              stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if IS_WIN:
+        kw["creationflags"] = CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+    else:
+        kw["start_new_session"] = True
+    return subprocess.Popen(j.spec["applog"], **kw)
+
+
+def applog_lines(p):
+    dec = new_decoder()
+    for line in iter(p.stdout.readline, b""):
+        yield dec.decode(line)
+
+
+def cmd_applog(store, a):
+    store.init()
+    ctx = Ctx(store)
+    j = ctx.need(a.id)
+    show = log_show(a, ctx.cfg)
+    jobs = [k for k in log_jobs(ctx, j, a.children) if k.spec["applog"]]
+    if not jobs:
+        raise JmError("%s%s: no `applog` command in the spec (applog = a command that prints the job's own log)" % (
+            j.id, " and its children" if a.children else ""))
+    sec = Sections(a.children, show)
+    procs = []
+    bad = []
+    ended = set()  # follow: commands jm ended because their job had ended
+
+    def start(k):
+        try:
+            p = applog_start(store, ctx.cfg, k, a)
+        except (JmError, OSError) as e:
+            warn("applog of %s: %s" % (k.id, e))
+            bad.append(k.id)
+            return None
+        procs.append((k, p))
+        return p
+    try:
+        if a.follow:
+            # All commands run at once; lines are written as they come, a `==> ID <==` line marking each switch.
+            # As with `jm log -f`, a command is ended once its job has ended and it printed nothing for a second,
+            # so `tail -f` in an applog needs no way to tell when to stop.
+            lines = queue.Queue()
+            heard = {}
+
+            def pump(jid, p):
+                for line in applog_lines(p):
+                    lines.put((jid, line))
+                lines.put((jid, None))
+            for k in jobs:
+                p = start(k)
+                if p is not None:
+                    t = threading.Thread(target=pump, args=(k.id, p))
+                    t.daemon = True
+                    t.start()
+            running = len(procs)
+            checked = 0
+            while running:
+                try:
+                    jid, line = lines.get(timeout=0.2)  # a timeout keeps Ctrl-C working on Windows
+                    if line is None:
+                        running -= 1
+                    else:
+                        heard[jid] = time.time()
+                        sec.write(jid, line)
+                except queue.Empty:
+                    pass
+                now = time.time()
+                if now - checked < 0.5:
+                    continue
+                checked = now
+                for k, p in procs:
+                    if k.id not in ended and p.poll() is None and now - heard.get(k.id, 0) >= 1.0 and \
+                            Job(store, k.id).state in ENDED:
+                        ended.add(k.id)
+                        kill_group(p.pid, hard=True)
+        else:
+            for k in jobs:
+                p = start(k)
+                if p is None:
+                    continue
+                if a.lines is None:
+                    for line in applog_lines(p):
+                        sec.write(k.id, line)
+                else:
+                    sec.write(k.id, "".join(collections.deque(applog_lines(p), maxlen=max(a.lines, 0))))
+                p.wait()
+        for k, p in procs:
+            rc = p.wait()
+            if rc and k.id not in ended:
+                warn("applog of %s exited %d" % (k.id, rc))
+                bad.append(k.id)
+    finally:
+        for k, p in procs:
+            if p.poll() is None:
+                kill_group(p.pid, hard=True)
+    return EXIT_ERR if bad else EXIT_OK
 
 
 def cmd_wait(store, a):
@@ -2768,11 +2984,17 @@ def build_parser():
 
     sub.add_parser("free", help="free capacity and queue size")
 
-    lg = sub.add_parser("log", help="a job's log")
-    lg.add_argument("id")
-    lg.add_argument("-f", "--follow", action="store_true")
-    lg.add_argument("-n", "--lines", type=int)
-    lg.add_argument("--raw", action="store_true", help="unmasked (terminal only)")
+    lg = sub.add_parser("log", help="a job's captured stdout + stderr (jm's banners included)")
+    al = sub.add_parser("applog", help="run the job's `applog` command: the log the job keeps itself")
+    for x in (lg, al):
+        x.add_argument("id")
+        x.add_argument("-f", "--follow", action="store_true")
+        x.add_argument("-n", "--lines", type=int)
+        x.add_argument("--raw", action="store_true", help="unmasked (terminal only)")
+        x.add_argument("--children", action="store_true", help="also its children, one `==> ID <==` section each")
+    g = lg.add_mutually_exclusive_group()
+    g.add_argument("--stdout", action="store_true", help="stdout only (needs split_stderr = yes in the spec)")
+    g.add_argument("--stderr", action="store_true", help="stderr only (needs split_stderr = yes in the spec)")
 
     w = sub.add_parser("wait", help="block until the job ends; exit code = the job's")
     w.add_argument("id")
@@ -2834,11 +3056,13 @@ def build_parser():
     sim.add_argument("--trap", action="store_true", help="ignore SIGTERM")
     sim.add_argument("--print-env", action="append", default=[], metavar="NAME")
     sim.add_argument("--out", help="append the --print-env lines to this file instead of stdout")
+    sim.add_argument("--stderr", metavar="TEXT", help="print this line to stderr first")
     return p
 
 
 COMMANDS = {
     "submit": cmd_submit, "list": cmd_list, "status": cmd_status, "free": cmd_free, "log": cmd_log,
+    "applog": cmd_applog,
     "wait": cmd_wait, "move": cmd_move, "swap": cmd_swap, "hold": cmd_hold, "release": cmd_release,
     "stop": cmd_stop, "cancel": cmd_cancel, "restart": cmd_restart, "requeue": cmd_requeue, "set": cmd_set,
     "edit": cmd_edit, "config": cmd_config, "clean": cmd_clean, "artifacts": cmd_artifacts,

@@ -154,3 +154,56 @@ switch a fan profile): the names and what they do are the machine owner's choice
   `env_pass = NAME` (taken from the daemon's environment at each start) or `env_file = /path` (a `KEY=VALUE`
   file, mode 0600, read at each start, never copied).
 - `jm log` and `jm status` mask token-looking strings; `jm log --raw` shows them, on a terminal only.
+
+## 8. Logs: `jm log` and `jm applog`
+
+A job has two kinds of log, and jm has a command for each (decisions in RDD_011):
+
+| | `jm log ID` | `jm applog ID` |
+|---|---|---|
+| shows | what jm **captured**: the stdout and stderr of the job's commands, with jm's run banners | the log the job **keeps itself**, printed by the spec's `applog` command |
+| stored in | `jobs/<id>/log` (and `jobs/<id>/stderr` with `split_stderr = yes`) | wherever the job writes it; jm stores nothing |
+| typical content | everything a job prints when it does not redirect, plus tracebacks and warnings of a job that writes its real log to a file of its own | `out/train.log`, a run directory, several files, a journal |
+
+Both take `-n N` (last N lines), `-f` (follow), `--raw` (unmasked, terminal only) and **`--children`**: the job
+and then all its descendants (depth first, as `jm list --tree`), each under a `==> ID <==` line, as `tail` prints
+several files. With `-f` the line is repeated whenever the output switches to another job; `-f` ends once every
+job shown has ended and is quiet, and picks up children a running group submits meanwhile.
+
+```sh
+jm log G --children -f            # follow a whole group's captured output
+jm log J --stderr                 # only the stderr (needs split_stderr = yes)
+jm applog J -n 50                 # the last 50 lines of the job's own log
+jm applog G --children -f         # every applog in the group, until the jobs end
+```
+
+**stdout and stderr.** By default both streams go into one file, `log`, in the order they were written. With
+`split_stderr = yes` in the spec, the stderr of every command jm runs for the job (`done_check`, `pre`, `start` /
+`resume`, `post`, `stop`) goes to `jobs/<id>/stderr` instead; the run banners are in both files. Then
+`jm log --stdout` shows `log` and `jm log --stderr` shows `stderr` (and `jm status` shows the tail of each). On
+a job without `split_stderr`, `--stdout` warns that the log holds both, and `--stderr` fails (one job) or skips it
+with a warning (`--children`). Splitting loses the order between the two streams, so leave it off unless the
+stderr is wanted on its own (a job that prints its progress to stdout and only errors to stderr). `notify` output
+always goes to `log`.
+
+**The job's own log: `applog`.** Any command that prints the log to stdout:
+
+```
+applog = tail -n ${JM_LINES:-200} ${JM_FOLLOW:+-f} out/train.log     # sh
+applog = cat out/*/summary.txt                                         # a group: the summary of every part
+applog = journalctl --user -u my-render -n ${JM_LINES:-100} ${JM_FOLLOW:+-f} --no-pager
+```
+
+- It runs when you call `jm applog` (never by the daemon), in the job's `cwd`, in any state - also queued,
+  failed or long done.
+- It gets `JM_LINES` (the `-n` value, or empty) and `JM_FOLLOW` (`1` with `-f`, else empty) to pass on, as
+  above. Without `-f` jm also keeps only the last N lines of its output itself, so `-n` works with a plain `cat`.
+- With `-f`, jm ends the command (its whole process group) once the job has ended and the command printed
+  nothing for a second, so `tail -f` stops by itself; Ctrl-C ends it at once.
+- With `--children`, every job in the tree that has an `applog` runs its own (children do not inherit the
+  parent's); without `-f` they run one after the other, with `-f` all at once.
+- It gets the config's and the spec's `env` lines and the `JM_*` variables (`JM_ID`, `JM_RUN`, `JM_STATE`, ...),
+  but **not** `env_pass` / `env_file`: what it prints is shown, often in a captured session, so it is given no
+  secret to print. Its output is masked like `jm log`.
+- Exit code 1 when a command exited non-zero or could not start (it is named on stderr), or when no job shown
+  has an `applog`.

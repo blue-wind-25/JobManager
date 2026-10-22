@@ -41,8 +41,10 @@ def q(s):
     return '"%s"' % s
 
 
-def sim(secs=0.3, exit=0, ram=0, progress=False, resumable=None, trap=False, print_env=(), out=None):
+def sim(secs=0.3, exit=0, ram=0, progress=False, resumable=None, trap=False, print_env=(), out=None, stderr=None):
     parts = [q(PY), q(JM), "_sim", "--secs", str(secs), "--exit", str(exit)]
+    if stderr:
+        parts += ["--stderr", q(stderr)]
     if ram:
         parts += ["--ram", str(ram)]
     if progress:

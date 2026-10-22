@@ -1,12 +1,13 @@
 # Implementation state
 
-Last update: 2026-10-21.
+Last update: 2026-10-22.
 
 | Part | Status | Notes |
 |---|---|---|
 | Repository skeleton: licence, `design/`, `rdd/`, `state/`, README, CLAUDE.md, CHANGELOG, examples | done | RDD_001 |
 | jm v1 - design/JM_DESIGN.md sec 1-11 | done | RDD_002 .. RDD_008 |
 | jm secrets - sec 16 | done | RDD_005 |
+| jm logs: `jm log --children / --stdout / --stderr` (`split_stderr`), `applog` and `jm applog` | done; tested on Linux, CI matrix not run yet | RDD_011 |
 | jm tests and CI - sec 12.5 | done; full CI matrix green (PR #2) | see below |
 | claude-guards - design/CLAUDE_GUARDS.md sec 2-5, 7 | done (in `guards/`, installed in `.claude/`) | RDD_009 |
 | jm v2 - sec 12.1 estimates / EASY backfill, sec 12.2 progress parsing and ETA | not started | `progress` samples are already stored in the v2 format |
@@ -16,6 +17,8 @@ Last update: 2026-10-21.
 
 ## Tested
 
+- 2026-10-22, logs change (RDD_011): 76 tests pass on Python 3.13 (Linux); `vermin -t=3.6-` finds nothing newer
+  than 3.6. The CI matrix has not run on it yet.
 - `python3 -m unittest discover tests`: 73 tests (Python 3.13 and 3.6, 2026-10-21, after the hook changes). CI run 39576098266 (2026-10-21, commit 451f745) is green on
   every runner: ubuntu-24.04, ubuntu-24.04-arm, macos-latest (arm64), macos-15-intel, windows-latest, and the
   python:3.6-slim, alpine and fedora containers.
@@ -37,7 +40,9 @@ alive); wrapper killed with `on_boot` resume / hold / fail; PID reuse (pid file 
 process); static groups (`parallel`, a failing child, `continue_on_fail`), dynamic children, cancelling a parent;
 plain-text hand-edit round trip; secrets: refused names and values in `env` lines, `env_pass` reaches the job
 while other secrets do not, `env_file` mode check, log masking, `--raw` refused without a terminal; service files;
-on_first_start / on_idle hooks; pause / cont; progress sampling and `jm status` live usage.
+on_first_start / on_idle hooks; pause / cont; progress sampling and `jm status` live usage; logs (RDD_011):
+`jm log --children` (plain and `-f`), `split_stderr` with `--stdout / --stderr`, `jm applog` (group and
+`--children`, `-n`, `JM_LINES`, no `env_pass` secret, a failing applog, `-f` ending with the job).
 
 ## Known limits
 
@@ -46,7 +51,7 @@ on_first_start / on_idle hooks; pause / cont; progress sampling and `jm status` 
 
 ## Decisions
 
-All reviewed by the owner on 2026-10-21; none open.
+RDD_001 .. RDD_010 reviewed by the owner on 2026-10-21; RDD_011 open.
 - Confirmed as built: RDD_005 (job environment minus secret names; the guard's name pattern), RDD_003
   (`jm restart` only for a running job, to the top of the queue; retries run `resume`, else `start`), RDD_006
   (`continue_on_fail`: recovery is the group's own business; no "stop running siblings" mode), RDD_007 (`jm list`
@@ -55,8 +60,10 @@ All reviewed by the owner on 2026-10-21; none open.
   (60 s), `STATE/machine`, `JM_HOOK`; `cwd` expands `$NAME` (RDD_005).
 - CI stays manual-trigger only (owner direction, 2026-10-21).
 - User documentation: docs/GUIDE.md (behaviour), docs/PORTING.md (moving a project's own job scripts to jm).
+- RDD_011 (logs, owner request 2026-10-22): open for the owner's review - in particular `split_stderr` off by
+  default, and `applog` getting no `env_pass` / `env_file` secrets.
 
 ## Next
 
-1. Tag `v1.0.0` (CI is green).
+1. Run the CI matrix on the logs change (PR), then tag `v1.0.0`.
 2. Dogfood on the CM5 (design sec 15.2), then v2.

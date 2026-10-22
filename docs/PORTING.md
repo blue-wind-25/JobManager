@@ -18,6 +18,8 @@ can start, stop and start again. This guide is the checklist (the design's versi
 | "retry with other settings" scripts | `jm requeue ID --spec-edit key=value`, or `jm set` then `jm requeue` |
 | a per-script queue file / ordering logic | `jm submit --top / --after ID`, `jm move`, `jm swap`, `jm hold` |
 | polling for completion, `tail -f` on a log | `jm wait ID` (exit code = the job's), `jm log -f ID` |
+| "where is the log of that run?" notes, `tail` on files under the run directory | `applog = tail -n ${JM_LINES:-200} ${JM_FOLLOW:+-f} out/train.log` in the spec; `jm applog [--children] ID` ([GUIDE.md](GUIDE.md) sec 8) |
+| `2> errors.txt` to keep the errors apart | `split_stderr = yes`; `jm log --stderr ID` |
 | a chain script: step 1, then step 2, then step 3 | three specs with `after`, or a group with `children` and `parallel = 1` |
 | "fan out one run per language / dataset" | a static group (`children = ...`, `parallel = N`) or a parent that submits children |
 | remounting a read-only data disk around runs (scripts of any name) | `on_first_start` / `on_idle` in jm's config, set to your scripts ([GUIDE.md](GUIDE.md) sec 6) |
@@ -55,6 +57,7 @@ env         = SET=gso_b
 start       = sh tools/train.sh foreground
 done_check  = test -s out/gso_b/extractor.bin
 progress    = tail -n 1 out/gso_b/train.log
+applog      = tail -n ${JM_LINES:-200} ${JM_FOLLOW:+-f} out/gso_b/train.log
 cpu         = 4
 ram         = 2500
 tokens      = trainer
@@ -88,7 +91,8 @@ sets=""; for kv in "$@"; do sets="$sets --set $kv"; done
 ssh "$host" "cd /mnt/data/project && git pull -q && jm submit $spec $sets"
 ```
 
-Status for the owner becomes `ssh host jm list`; logs `ssh -t host jm log -f ID`.
+Status for the owner becomes `ssh host jm list`; logs `ssh -t host jm log -f ID` (what the job printed) and
+`ssh -t host jm applog -f ID` (the log it writes itself), with `--children` for a whole group.
 
 ## 6. Switch over safely
 

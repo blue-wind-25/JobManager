@@ -12,3 +12,7 @@
 - Machine hooks run outside the state lock; new config keys `hook_timeout` (120 s) and `idle_after` (60 s);
   `STATE/machine` records busy / idle; hooks get `JM_HOOK`. `cwd` expands `$NAME`. `jm submit --continue-on-fail`.
 - docs/GUIDE.md (behaviour reference) and docs/PORTING.md (moving a project's job scripts to jm).
+- Logs (RDD_011): `jm log --children` (a job and its descendants, `==> ID <==` sections, `-f` follows new
+  children too), spec key `split_stderr` with `jm log --stdout / --stderr`; spec key `applog` (a command that
+  prints the job's own log) and `jm applog ID [-f] [-n N] [--children]`, run without `env_pass` / `env_file`
+  secrets. `jm log -f` counts bytes (Windows `\r\n`) and survives `log_max` rotation.
