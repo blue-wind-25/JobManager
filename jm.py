@@ -2349,6 +2349,7 @@ def cmd_applog(store, a):
             for k in jobs:
                 p = start(k)
                 if p is not None:
+                    heard[k.id] = time.time() + 1.0  # quiet counts from its start, plus a second to start up
                     t = threading.Thread(target=pump, args=(k.id, p))
                     t.daemon = True
                     t.start()
@@ -2993,7 +2994,7 @@ def build_parser():
         x.add_argument("--raw", action="store_true", help="unmasked (terminal only)")
         x.add_argument("--children", action="store_true", help="also its children, one `==> ID <==` section each")
     g = lg.add_mutually_exclusive_group()
-    g.add_argument("--stdout", action="store_true", help="stdout only (needs split_stderr = yes in the spec)")
+    g.add_argument("--stdout", action="store_true", help="stdout only (without split_stderr the log holds both)")
     g.add_argument("--stderr", action="store_true", help="stderr only (needs split_stderr = yes in the spec)")
 
     w = sub.add_parser("wait", help="block until the job ends; exit code = the job's")

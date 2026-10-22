@@ -7,8 +7,8 @@ Last update: 2026-10-22.
 | Repository skeleton: licence, `design/`, `rdd/`, `state/`, README, CLAUDE.md, CHANGELOG, examples | done | RDD_001 |
 | jm v1 - design/JM_DESIGN.md sec 1-11 | done | RDD_002 .. RDD_008 |
 | jm secrets - sec 16 | done | RDD_005 |
-| jm logs: `jm log --children / --stdout / --stderr` (`split_stderr`), `applog` and `jm applog` | done; tested on Linux, CI matrix not run yet | RDD_011 |
-| docs/REMOTE.md (ssh use, phone); `examples/jm-shortcuts.sh` | done; shortcuts tested in sh (CI: also busybox on Alpine) | RDD_012 (no `jm --host` in v1) |
+| jm logs: `jm log --children / --stdout / --stderr` (`split_stderr`), `applog` and `jm applog` | done; CI matrix green (PR #3) | RDD_011 |
+| docs/REMOTE.md (ssh use, phone); `examples/jm-shortcuts.sh` | done; shortcuts tested in sh (CI: also busybox on Alpine), CI matrix green (PR #3) | RDD_012 (no `jm --host` in v1) |
 | jm tests and CI - sec 12.5 | done; full CI matrix green (PR #2) | see below |
 | claude-guards - design/CLAUDE_GUARDS.md sec 2-5, 7 | done (in `guards/`, installed in `.claude/`) | RDD_009 |
 | jm v2 - sec 12.1 estimates / EASY backfill, sec 12.2 progress parsing and ETA | not started | `progress` samples are already stored in the v2 format |
@@ -18,8 +18,9 @@ Last update: 2026-10-22.
 
 ## Tested
 
-- 2026-10-22, logs change (RDD_011): 76 tests pass on Python 3.13 (Linux); `vermin -t=3.6-` finds nothing newer
-  than 3.6. The CI matrix has not run on it yet.
+- 2026-10-22, logs change (RDD_011) and phone shortcuts (RDD_012): 77 tests pass on Python 3.13 (Linux);
+  `vermin -t=3.6-` finds nothing newer than 3.6. CI matrix green on every runner for PR #3 (run 39711720510,
+  commit 4104de7; push / PR triggers were on for that PR only, manual again after it).
 - `python3 -m unittest discover tests`: 73 tests (Python 3.13 and 3.6, 2026-10-21, after the hook changes). CI run 39576098266 (2026-10-21, commit 451f745) is green on
   every runner: ubuntu-24.04, ubuntu-24.04-arm, macos-latest (arm64), macos-15-intel, windows-latest, and the
   python:3.6-slim, alpine and fedora containers.
@@ -43,7 +44,14 @@ plain-text hand-edit round trip; secrets: refused names and values in `env` line
 while other secrets do not, `env_file` mode check, log masking, `--raw` refused without a terminal; service files;
 on_first_start / on_idle hooks; pause / cont; progress sampling and `jm status` live usage; logs (RDD_011):
 `jm log --children` (plain and `-f`), `split_stderr` with `--stdout / --stderr`, `jm applog` (group and
-`--children`, `-n`, `JM_LINES`, no `env_pass` secret, a failing applog, `-f` ending with the job); the phone shortcuts (`examples/jm-shortcuts.sh`) in sh.
+`--children`, `-n`, `JM_LINES`, no `env_pass` secret, a failing applog, `-f` ending with the job, `-f` on an
+ended job with a slow applog); the phone shortcuts (`examples/jm-shortcuts.sh`) in sh.
+
+## Known issues
+
+- `test_token` (unchanged since v1) failed once in three local runs (2026-10-22): `proc_alive` caches a token
+  miss, but right after a fork the child's command line is still the parent's. Proposed fix: cache only hits.
+  Waiting for the owner (this PR or a separate one).
 
 ## Known limits
 
@@ -67,5 +75,5 @@ RDD_001 .. RDD_010 reviewed by the owner on 2026-10-21; RDD_011 and RDD_012 open
 
 ## Next
 
-1. Run the CI matrix on the logs change (PR), then tag `v1.0.0`.
+1. Owner review of RDD_011 / RDD_012 (PR #3), then tag `v1.0.0`.
 2. Dogfood on the CM5 (design sec 15.2), then v2.

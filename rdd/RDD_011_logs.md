@@ -49,8 +49,9 @@ Two different things are called "the log" of a job:
   honour them itself: `applog = tail -n ${JM_LINES:-200} ${JM_FOLLOW:+-f} out/train.log`. Without `-f`, jm also
   keeps only the last N lines of what it printed, so `-n` works with a command that ignores `JM_LINES`.
 - With `-f`, all the commands run at once and their lines are written as they arrive. Each command is ended
-  (its whole process group) once its job has ended and it printed nothing for 1 s, so a `tail -f` applog
-  stops by itself like `jm log -f`; jm also ends them on Ctrl-C or a closed pipe. Without `-f` they run one after
+  (its whole process group) once its job has ended and it printed nothing for 1 s - counted from its last line,
+  or from its start plus 1 s for starting up, so a slow command on an ended job still prints - so a `tail -f`
+  applog stops by itself like `jm log -f`; jm also ends them on Ctrl-C or a closed pipe. Without `-f` they run one after
   the other.
 - Its environment: the config's and the spec's `env` lines and `JM_ID`, `JM_NAME`, `JM_HOME`, `JM_RUN`,
   `JM_HOW`, `JM_PARENT`, `JM_STATE`, `JM_JM`, `JM_LINES`, `JM_FOLLOW` - **without** `env_pass` / `env_file`:

@@ -564,6 +564,10 @@ class TestApplog(JmTestCase):
         self.assertEqual(out.splitlines(), ["==> %s <==" % p, "env MY_API_TOKEN=<unset>", "sim: finished, exit 0",
                                             "==> %s <==" % c, "env MY_API_TOKEN=<unset>", "sim: finished, exit 0"])
         self.assertIn("env JM_LINES=5", self.jm_ok("applog", c, "-n", "5"))
+        # -f on an ended job: a command that is slow to print still gets to, before jm ends it.
+        slow = self.submit(spec(sim(0.1), applog="%s %s _sim --secs 0.5" % (q(PY), q(JM))))
+        self.wait_ended(slow)
+        self.assertIn("sim: finished", self.jm_ok("applog", slow, "-f"))
         rc, _, err = self.jm("applog", plain)
         self.assertEqual(rc, 1)
         self.assertIn("no `applog`", err)
