@@ -1,6 +1,6 @@
 # Implementation state
 
-Last update: 2026-10-22.
+Last update: 2026-10-23.
 
 | Part | Status | Notes |
 |---|---|---|
@@ -16,7 +16,8 @@ Last update: 2026-10-22.
 | jm v3 - sec 12.3 several users, sec 12.4 several machines (`jm free` already exists) | not started | |
 | claude-guards in its own repository; adoption in HowToTrainYourPetAI (CLAUDE_GUARDS.md sec 6) | not started | `guards/` moves out as is |
 | Release 1.0.0 (`VERSION`, CHANGELOG; tag `v1.0.0` on the release PR's merge) | done | |
-| Dogfooding on the CM5 (JM_DESIGN.md sec 15.2) | not started | install from the `v1.0.0` tag |
+| Read-only home while idle: `home_rw`, no writer held by an idle daemon | done (1.1.0) | RDD_014; `TestReadOnlyHome` |
+| Dogfooding on the CM5 (JM_DESIGN.md sec 15.2) | started 2026-10-23 (HowToTrainYourPetAI RDD_646) | 1.0.0 showed RDD_014; runs 1.1.0 |
 
 ## Tested
 
@@ -60,7 +61,7 @@ boot-scoped monotonic stamp (`elapsed`), `trim_log`, a job trimmed while it writ
 
 ## Decisions
 
-RDD_001 .. RDD_010 reviewed by the owner on 2026-10-21, RDD_011 .. RDD_013 on 2026-10-22; none open.
+RDD_001 .. RDD_010 reviewed by the owner on 2026-10-21, RDD_011 .. RDD_013 on 2026-10-22; RDD_014 (2026-10-23, read-only home) awaits review.
 - Confirmed as built: RDD_005 (job environment minus secret names; the guard's name pattern), RDD_003
   (`jm restart` only for a running job, to the top of the queue; retries run `resume`, else `start`), RDD_006
   (`continue_on_fail`: recovery is the group's own business; no "stop running siblings" mode), RDD_007 (`jm list`
@@ -79,6 +80,6 @@ RDD_001 .. RDD_010 reviewed by the owner on 2026-10-21, RDD_011 .. RDD_013 on 20
 
 ## Next
 
-1. Dogfood v1.0.0 on the CM5 (design sec 15.2): one or two non-critical jobs under jm with the old scripts kept,
+1. Dogfood v1.1.0 on the CM5 (design sec 15.2): one or two non-critical jobs under jm with the old scripts kept,
    a power cut mid-run, logs checked from the phone, a chained job; then move the real work over.
 2. Then v2.

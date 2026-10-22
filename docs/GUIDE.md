@@ -144,7 +144,24 @@ How they run:
 - The state is kept in `STATE/machine` (`busy <UTC>` or `idle <UTC>`, also shown by `jm status`), so it
   survives a daemon restart and other scripts can read it.
 - Hooks get the config's `env` lines, `JM_HOME`, and `JM_HOOK` (`on_first_start` or `on_idle`); they do **not**
-  get `JM_ID`.
+  get `JM_ID`. Their output goes into `daemon.log` (`<hook> output:` lines) after they end.
+
+**The state dir on the mount that on_idle makes read-only** (a read-only root, the state dir on the data mount,
+nothing else writable; RDD_014): set **`home_rw`** to the command that makes it writable again, usually the same
+script as `on_first_start`:
+
+```
+home_rw        = /usr/local/bin/data-rw.sh   # a jm command that must write finds its home read-only: run this first
+```
+
+- Commands that only read (`list`, `status`, `log`, `applog`, `wait`, `free`, `artifacts`, `config`,
+  `daemon status`) work on the read-only home; `submit`, every queue change, `config k=v`, `daemon start` and
+  `daemon stop` run `home_rw` first (and fail with its output if the home stays read-only).
+- The daemon writes `machine idle` before on_idle, then waits without writing until a command has made the home
+  writable again; it is not restarted. A daemon started after a boot, with the mount still read-only, runs
+  `home_rw` itself, so a `~/.bashrc` line `jm daemon start` needs nothing before it.
+- An idle daemon holds no file open for writing on its home (Unix): a remount read-only fails (EBUSY) while one is.
+  A hook that leaves a background process holding its output open makes the daemon wait for `hook_timeout`.
 
 **Jobs that call the hook scripts themselves.** jm cannot stop a job from running the read-only script (whatever
 its name) in the middle of other jobs' work. When adopting jm, make the scripts jm-aware instead, using the
@@ -160,6 +177,9 @@ if [ -z "$JM_HOOK" ] && grep -q '^busy' "${JM_HOME:-$HOME/.jm}/machine" 2>/dev/n
 fi
 # ... remount read-only ...
 ```
+
+Ready-made versions of both: [examples/data-rw.sh](../examples/data-rw.sh) and
+[examples/data-ro.sh](../examples/data-ro.sh) (jm-aware as above, the mount named by `DATA_MOUNT`).
 
 The writable script (`data-rw.sh` here) called from a job is harmless (the mount is already writable), so it needs
 no change; removing such calls from job scripts is still cleaner (see [PORTING.md](PORTING.md)). The same applies

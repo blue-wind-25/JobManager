@@ -261,6 +261,8 @@ docs/REMOTE.md (RDD_012).
 Read-only root (the CM5): `JM_HOME` on the writable mount; per-job `pre` / `post` or global hooks for
 `data-rw.sh` / `data-ro.sh`. Global hooks in `config`: `on_first_start` (the machine goes from idle to busy) and
 `on_idle` (the last job ended), so the mount is made writable once and read-only again only when nothing runs.
+With the state dir on that mount, `home_rw` (the same `data-rw.sh`) makes it writable for any jm command that must
+write; an idle daemon holds no writer there and writes nothing while it is read-only (RDD_014).
 
 ## 11. Lessons carried over from the CM5 scripts
 
@@ -448,7 +450,7 @@ Python floor 3.6 matches CentOS 7's base-repo `python3`, so even that box runs i
 A decision record (RDD) first; it binds the steps below. Then:
 1. **CM5 install:** `~/bin/jm` from a tag; `JM_HOME=/mnt/data/pi/jm` (the root is read-only);
    `config`: `cpus = 4`, `ram = 4000`, `ram_reserve = 500`, `tokens = trainer:1`, `tokens = bench_jvm:2`,
-   `tokens = godot:1`, `on_first_start = data-rw.sh`, `on_idle = data-ro.sh`; `jm daemon install systemd` if the
+   `tokens = godot:1`, `on_first_start = data-rw.sh`, `home_rw = data-rw.sh`, `on_idle = data-ro.sh` (RDD_014); `jm daemon install systemd` if the
    read-only root allows a user unit, else the `~/.bashrc` guard (`jm daemon bashrc`). jm and `JM_HOME` visible
    to non-interactive ssh (`/usr/local/bin/jm`, or the exports at the top of `~/.bashrc`), and
    `examples/jm-shortcuts.sh` sourced there for checks from the phone (docs/REMOTE.md).

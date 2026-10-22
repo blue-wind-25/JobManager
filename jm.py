@@ -34,6 +34,7 @@ import secrets
 import shlex
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -41,7 +42,7 @@ import threading
 import time
 import traceback
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 IS_WIN = os.name == "nt"
 IS_LINUX = sys.platform.startswith("linux")
 JM_PATH = os.path.abspath(__file__)
@@ -261,7 +262,15 @@ class FileLock(object):
         self.fd = None
 
     def acquire(self, blocking=True, timeout=None):
-        fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
+        # Unix: flock needs no write access, and a read-only fd is no writer on the mount, so a hook can remount
+        # JM_HOME read-only while the daemon holds its lock (RDD_014). A lock file that cannot be created on a
+        # read-only home is granted without a file: nothing can change the state there either.
+        try:
+            fd = os.open(self.path, (os.O_RDWR if IS_WIN else os.O_RDONLY) | os.O_CREAT, 0o600)
+        except OSError:
+            if IS_WIN or os.path.exists(self.path) or os.access(os.path.dirname(self.path), os.W_OK):
+                raise
+            return True
         deadline = None if timeout is None else time.monotonic() + timeout
         while True:
             try:
@@ -624,7 +633,7 @@ CONFIG_KEYS = [
     ("progress_every", "dur", 60.0), ("keep", "dur", 7 * 86400.0), ("env", "env", None),
     ("secret_names", "list", None), ("not_secret", "list", None), ("secret_prefixes", "list", None),
     ("on_first_start", "cmd", None), ("on_idle", "cmd", None), ("hook_timeout", "dur", 120.0),
-    ("idle_after", "dur", 60.0), ("log_max", "num", 100.0),
+    ("idle_after", "dur", 60.0), ("log_max", "num", 100.0), ("home_rw", "cmd", None),
 ]
 LIST_KINDS = ("list", "env", "tokens")
 CMD_KEYS_SPEC = [k for k, kind, _ in SPEC_KEYS if kind == "cmd"]
@@ -789,6 +798,7 @@ DEFAULT_CONFIG = """# jm machine config (design/JM_DESIGN.md sec 6). `key = valu
 # on_idle        = data-ro.sh    # any command (example name): nothing has run for idle_after
 # idle_after     = 60s
 # hook_timeout   = 120s
+# home_rw        = data-rw.sh    # any command: makes this state dir writable when it is read-only (on_idle)
 # log_max        = 100         # MB per job log and for daemon.log (the older part goes to *.1); 0 = no limit
 """
 
@@ -880,7 +890,41 @@ class Store(object):
     def p(self, name):
         return os.path.join(self.home, name)
 
+    def writable(self):
+        return not os.path.isdir(self.home) or os.access(self.home, os.W_OK)
+
+    def need_write(self):
+        """Before any write: a read-only home (an on_idle hook remounted it) is made writable by the config's
+        `home_rw` command first (RDD_014). Commands that only read work on a read-only home as it is."""
+        if self.writable():
+            return
+        cfg = self.config()
+        if not cfg["home_rw"]:
+            raise JmError("%s is read-only; set home_rw in its config to a command that makes it writable"
+                          % self.home)
+        env = base_env(cfg)
+        env.update({"JM_HOME": self.home, "JM_HOOK": "home_rw"})
+        try:
+            p = subprocess.Popen(cfg["home_rw"], shell=True, env=env, cwd=self.home, stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            try:
+                text, _ = p.communicate(timeout=cfg["hook_timeout"])
+                rc = p.returncode
+            except subprocess.TimeoutExpired:
+                p.kill()
+                text, _ = p.communicate()
+                rc = 124
+        except OSError as e:
+            text, rc = str(e).encode("utf-8"), 127
+        text = (text or b"").decode("utf-8", "replace").strip()
+        if rc != 0 or not self.writable():
+            raise JmError("home_rw (%s) exited %d and %s is still read-only%s" % (
+                cfg["home_rw"], rc, self.home, (": " + text) if text else ""))
+        self.log("home_rw: %s exited 0%s" % (cfg["home_rw"], ("\n" + text) if text else ""))
+
     def init(self):
+        if not self.writable():
+            return  # a read-only home: readers use what is there; writers call need_write() first
         if not os.path.isdir(self.jobs_dir):
             os.makedirs(self.jobs_dir, 0o700)
         if not os.path.exists(self.p("config")):
@@ -925,7 +969,10 @@ class Store(object):
         return True
 
     def log(self, msg):
-        append_line(self.p("daemon.log"), "%s %s" % (utc(), msg))
+        try:
+            append_line(self.p("daemon.log"), "%s %s" % (utc(), msg))
+        except OSError:
+            pass  # a read-only home (after on_idle): the line is lost, the daemon goes on
 
 
 class Ctx(object):
@@ -1180,23 +1227,26 @@ def run_global_hook(store, cfg, key):
     env = base_env(cfg)
     env.update({"JM_HOME": store.home, "JM_HOOK": key})
     store.log("%s: %s" % (key, cmd))
-    log = open(store.p("daemon.log"), "ab")
+    # Its output through a pipe, not daemon.log: an on_idle hook may remount JM_HOME read-only, which fails
+    # (EBUSY) while any file on it is open for writing (RDD_014).
     try:
-        p = subprocess.Popen(cmd, shell=True, env=env, cwd=store.home, stdin=subprocess.DEVNULL, stdout=log,
-                             stderr=subprocess.STDOUT)
+        p = subprocess.Popen(cmd, shell=True, env=env, cwd=store.home, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:
-            rc = p.wait(timeout=cfg["hook_timeout"])
+            text, _ = p.communicate(timeout=cfg["hook_timeout"])
+            rc = p.returncode
         except subprocess.TimeoutExpired:
             p.kill()
-            p.wait()
+            text, _ = p.communicate()
             rc = 124
-        store.log("%s exited %d" % (key, rc))
-        return rc
     except OSError as e:
         store.log("%s failed: %s" % (key, e))
         return 127
-    finally:
-        log.close()
+    text = (text or b"").decode("utf-8", "replace").rstrip()
+    if text:
+        store.log("%s output:\n%s" % (key, text))
+    store.log("%s exited %d" % (key, rc))
+    return rc
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -1648,10 +1698,11 @@ def daemon_pass(store, daemon):
 def run_wanted_hook(store, cfg, daemon):
     """Run the hook the last pass asked for. True when the next pass should follow at once."""
     key, daemon.want_hook = daemon.want_hook, None
-    rc = run_global_hook(store, cfg, key)
     if key == "on_idle":
-        daemon.set_machine(store, False)
+        daemon.set_machine(store, False)  # first: the hook may make JM_HOME read-only (RDD_014)
+        run_global_hook(store, cfg, key)
         return False
+    rc = run_global_hook(store, cfg, key)
     if rc == 0:
         daemon.hook_error = None
         daemon.set_machine(store, True)
@@ -1690,7 +1741,33 @@ def sample_progress(store, cfg, daemon):
             write_atomic(j.path("progress"), "\n".join(old + ["%s %s" % (utc(), lines[-1].strip())]) + "\n")
 
 
+class _Idle(Exception):
+    """A daemon pass skipped: the home is read-only."""
+
+
+def release_home_writers(store):
+    """A detached daemon's stdout / stderr are daemon.log, so start-up errors land there. Once it runs it logs
+    through store.log (open, append, close) only, so it lets go of those writers: a remount read-only of JM_HOME's
+    file system (an on_idle hook) fails with EBUSY while any file on it is open for writing (RDD_014)."""
+    if IS_WIN:
+        return
+    dev = os.stat(store.home).st_dev
+    null = None
+    for fd in (1, 2):
+        try:
+            st = os.fstat(fd)
+        except OSError:
+            continue
+        if stat.S_ISREG(st.st_mode) and st.st_dev == dev:
+            if null is None:
+                null = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(null, fd)
+    if null is not None:
+        os.close(null)
+
+
 def daemon_run(store, quiet=False):
+    store.need_write()
     store.init()
     dlock = FileLock(store.p("daemon.lock"))
     if not dlock.acquire(blocking=False):
@@ -1707,6 +1784,7 @@ def daemon_run(store, quiet=False):
     write_atomic(store.p("daemon.pid"), "%d %s %s\n" % (me, proc_start_time(me) or "?", VERSION))
     remove_file(store.p("daemon.stop"))
     store.log("daemon started, pid %d, jm %s, python %s" % (me, VERSION, sys.version.split()[0]))
+    release_home_writers(store)
     daemon = DaemonState(store)
     cfg = None
     try:
@@ -1719,6 +1797,10 @@ def daemon_run(store, quiet=False):
                     cfg = parse_config("")
             again = False
             try:
+                if not store.writable():
+                    # Read-only home (on_idle remounted it): no pass, no log line, until a jm command makes it
+                    # writable again (home_rw). Nothing can have been queued meanwhile (RDD_014).
+                    raise _Idle()
                 with store.lock():
                     daemon_pass(store, daemon)
                 if daemon.want_hook:
@@ -1727,6 +1809,8 @@ def daemon_run(store, quiet=False):
                 if trim_log(store.p("daemon.log"), cfg["log_max"]):
                     store.log("daemon.log over log_max %s MB; the part before is in daemon.log.1" % fmt_num(
                         cfg["log_max"]))
+            except _Idle:
+                pass
             except Exception:
                 store.log("pass failed:\n" + traceback.format_exc())
             reap_spawned()
@@ -1959,6 +2043,7 @@ def confirm(question):
 
 def mutate(store, fn):
     """Run fn(ctx) inside one locked transaction, then wake the daemon."""
+    store.need_write()
     store.init()
     with store.lock():
         ctx = Ctx(store)
@@ -2870,6 +2955,8 @@ def daemon_start(store, quiet=False):
         if not quiet:
             out(daemon_status_line(store)[1])
         return EXIT_OK
+    store.need_write()
+    store.init()
     try:
         rotate_log(store.p("daemon.log"), store.config()["log_max"])
     except JmError:
@@ -2897,6 +2984,7 @@ def daemon_stop(store, quiet=False):
         if not quiet:
             out("daemon: not running")
         return EXIT_OK
+    store.need_write()
     write_atomic(store.p("daemon.stop"), utc() + "\n")
     store.wake()
     deadline = time.monotonic() + 30

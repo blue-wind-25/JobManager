@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.0 - 2026-10-23
+
+- A state dir that goes read-only while idle (RDD_014): new config key `home_rw`, a command any jm command that
+  must write runs first when its home is read-only; read-only commands work there as it is; the daemon writes
+  `machine idle` before `on_idle`, then waits without writing; `daemon start` on a read-only home runs `home_rw`.
+- Fix (Unix): an idle daemon held files open for writing on its home (`daemon.lock`, its stdout / stderr on
+  `daemon.log`, the hook output file), so an `on_idle` remount read-only failed with EBUSY. Lock files are opened
+  read-only, the daemon lets go of a stdout / stderr on its home once started, hook output goes through a pipe
+  into `daemon.log` lines.
+- examples/data-rw.sh, examples/data-ro.sh: machine hooks for a data mount that is read-only when idle (the
+  read-only one jm-aware: skips inside a job and while jm is busy).
+
 ## 1.0.0 - 2026-10-22
 
 - jm v1 (design/JM_DESIGN.md sections 1-11, 12.5 and 16): state dir and lock, spec / config parser, CLI, daemon

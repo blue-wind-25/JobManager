@@ -104,6 +104,7 @@ job receives; the spec then uses `$DATA` (`cwd` and `env` values expand `$NAME`)
 jm config cpus=4 ram=4000 ram_reserve=500 tokens=trainer:1 tokens=gpu:1
 jm config log_max=50             # optional: a smaller log cap (MB) on a small SD card; default 100
 jm config on_first_start=/usr/local/bin/data-rw.sh on_idle=/usr/local/bin/data-ro.sh   # if needed; your own names
+jm config home_rw=/usr/local/bin/data-rw.sh   # when the state dir is on that mount (GUIDE.md sec 6)
 jm daemon install systemd        # or launchd / windows; or `jm daemon bashrc` for a ~/.bashrc line
 sudo ln -s ~/bin/jm /usr/local/bin/jm   # so `ssh host jm ...` finds it (REMOTE.md sec 1)
 ```

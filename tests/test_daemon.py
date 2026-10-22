@@ -19,6 +19,7 @@
 # wrapper crashes (adoption, on_boot), PID reuse, groups and dynamic children, secrets at run time.
 
 import os
+import subprocess
 import time
 import unittest
 
@@ -366,6 +367,86 @@ class TestHooks(JmTestCase):
         self.assertEqual(self.state(a), "waiting")
         self.jm_ok("config", "on_first_start=" + self.hook(first))
         self.assertEqual(self.wait_ended(a), "done")
+
+
+CHMOD_TREE = """import os, stat, sys
+home, mode = sys.argv[1], sys.argv[2]
+work = os.path.join(home, "work")
+for root, dirs, files in os.walk(home):
+    dirs[:] = [d for d in dirs if os.path.join(root, d) != work]
+    for n in [root] + [os.path.join(root, f) for f in files]:
+        m = os.stat(n).st_mode
+        os.chmod(n, (m | stat.S_IWUSR) if mode == "rw" else (m & ~0o222))
+"""
+
+
+@unittest.skipIf(IS_WIN or os.geteuid() == 0, "needs Unix permissions (root writes read-only files)")
+class TestReadOnlyHome(JmTestCase):
+    """RDD_014: an on_idle hook may make JM_HOME read-only (chmod here stands in for a remount); readers work,
+    writers run home_rw first, and the daemon survives and holds no writable file on its home."""
+
+    def setUp(self):
+        JmTestCase.setUp(self)
+        script = self.write("chmod_tree.py", CHMOD_TREE)
+        self.ro = "%s %s %s ro" % (q(PY), q(script), q(self.home))
+        self.rw = "%s %s %s rw" % (q(PY), q(script), q(self.home))
+
+    def make_rw(self):
+        subprocess.check_call([PY, os.path.join(self.work, "chmod_tree.py"), self.home, "rw"])
+
+    def test_idle_read_only_then_submit(self):
+        self.jm_ok("config", "on_idle=" + self.ro, "home_rw=" + self.rw, "idle_after=0.5s")
+        pid = jm.read_text(os.path.join(self.home, "daemon.pid")).split()[0]
+        a = self.submit(spec(sim(0.2)))
+        self.assertEqual(self.wait_ended(a), "done")
+        self.until(lambda: not os.access(self.home, os.W_OK), "on_idle made the home read-only")
+        time.sleep(1)  # a few daemon passes on the read-only home
+        self.assertIn(a, self.jm_ok("list", "--all"))
+        self.assertIn("done", self.jm_ok("status", a))
+        self.jm_ok("daemon", "status")
+        b = self.submit(spec(sim(0.2)))  # runs home_rw first
+        self.assertTrue(os.access(self.home, os.W_OK))
+        self.assertEqual(self.wait_ended(b), "done")
+        self.assertEqual(jm.read_text(os.path.join(self.home, "daemon.pid")).split()[0], pid)
+        self.assertIn("home_rw: ", jm.read_text(os.path.join(self.home, "daemon.log")))
+
+    def test_read_only_without_home_rw(self):
+        self.stop_daemon()
+        subprocess.check_call([PY, os.path.join(self.work, "chmod_tree.py"), self.home, "ro"])
+        try:
+            rc, out, err = self.jm("submit", "--name", "x", "--", "true")
+            self.assertNotEqual(rc, 0)
+            self.assertIn("read-only; set home_rw", err)
+            self.jm_ok("list")
+            rc, out, err = self.jm("daemon", "start")
+            self.assertNotEqual(rc, 0)
+        finally:
+            self.make_rw()
+
+    @unittest.skipUnless(os.path.isdir("/proc/self/fdinfo"), "Linux /proc")
+    def test_daemon_holds_no_writer_on_home(self):
+        # A remount read-only fails (EBUSY) while a file on the mount is open for writing.
+        a = self.submit(spec(sim(0.2)))
+        self.assertEqual(self.wait_ended(a), "done")
+        pid = jm.read_text(os.path.join(self.home, "daemon.pid")).split()[0]
+
+        def writers():
+            found = set()
+            for fd in os.listdir("/proc/%s/fd" % pid):
+                try:
+                    target = os.readlink("/proc/%s/fd/%s" % (pid, fd))
+                    info = jm.read_text("/proc/%s/fdinfo/%s" % (pid, fd))
+                except OSError:
+                    continue
+                flags = [ln.split()[1] for ln in info.splitlines() if ln.startswith("flags:")]
+                if target.startswith(self.home) and flags and int(flags[0], 8) & 3:
+                    found.add(target)
+            return found
+        held = writers()
+        for _ in range(10):  # held open across passes, not a pass's own short write (write_atomic's temp file)
+            time.sleep(0.1)
+            held &= writers()
+        self.assertEqual(sorted(held), [])
 
 
 class TestCrashes(JmTestCase):

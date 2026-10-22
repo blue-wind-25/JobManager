@@ -19,7 +19,7 @@ There is no network port and no web UI: remote use is `ssh -t host jm ...`, with
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/blue-wind-25/JobManager/v1.0.0/jm.py -o ~/bin/jm && chmod +x ~/bin/jm
+curl -fsSL https://raw.githubusercontent.com/blue-wind-25/JobManager/v1.1.0/jm.py -o ~/bin/jm && chmod +x ~/bin/jm
 jm daemon start                 # or: jm daemon install systemd | launchd | windows
 ```
 
@@ -109,7 +109,7 @@ secrets at all. See design/JM_DESIGN.md sec 16.
 |---|---|
 | `jm.py` | the whole tool |
 | `tests/` | `python3 -m unittest discover tests` (unit tests and daemon tests with `jm _sim` fake jobs) |
-| `examples/` | sample specs; `jm-shortcuts.sh` (short commands on a worker, e.g. from a phone) |
+| `examples/` | sample specs; `jm-shortcuts.sh` (short commands on a worker, e.g. from a phone); `data-rw.sh` / `data-ro.sh` (machine hooks for a read-only data mount) |
 | `guards/` | claude-guards: Claude Code safety hooks (secret echo, broad search, protected files), installed into `.claude/` |
 | `docs/` | user documentation: `GUIDE.md`, `REMOTE.md`, `PORTING.md` |
 | `design/` | design notes: `JM_DESIGN.md`, `CLAUDE_GUARDS.md` |
