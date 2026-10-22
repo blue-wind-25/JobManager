@@ -14,7 +14,7 @@ on **one machine**: a Raspberry Pi CM5, a Jetson, a Linux box, macOS, Windows.
 - **Sub-jobs**: static groups (`children = FILE`, `parallel = N`) and children a running job submits itself.
 - **Secret-safe**: refuses secrets in specs, passes them by name (`env_pass`, `env_file`), masks tokens in logs.
 
-There is no network port and no web UI: remote use is `ssh host jm ...`.
+There is no network port and no web UI: remote use is `jm -H HOST <command>` (ssh), with the same commands.
 
 ## Install
 
@@ -37,6 +37,7 @@ jm list                                                        # id, state, name
 jm status j0001                                                # spec summary, runs, live RSS/CPU, log tail
 jm log -f j0001
 jm wait j0001; echo $?                                         # exit code = the job's
+jm -H pi log -f j0001                                          # any command, on worker `pi` over ssh
 ```
 
 A spec (`examples/train.jm`):
@@ -64,6 +65,7 @@ Every key is described in [design/JM_DESIGN.md](design/JM_DESIGN.md) sec 5 (spec
 - [docs/GUIDE.md](docs/GUIDE.md): how jm behaves - job states, `start` / `resume` / `restart`, retries, groups
   and what happens when a child fails, stopping (and Windows), the `on_first_start` / `on_idle` machine hooks
   (read-only data mounts), secrets, logs (`jm log` / `jm applog`).
+- [docs/REMOTE.md](docs/REMOTE.md): driving workers from a workstation (`jm -H HOST`, `~/.jm/hosts`, plain ssh).
 - [docs/PORTING.md](docs/PORTING.md): moving a project's own queue / resume / waiter scripts to jm.
 
 ## Commands
@@ -85,6 +87,7 @@ Every key is described in [design/JM_DESIGN.md](design/JM_DESIGN.md) sec 5 (spec
 | `jm edit ID` / `jm set ID k=v k+=v k=` | change a spec that is not running |
 | `jm pause ID` / `jm cont ID` | SIGSTOP / SIGCONT (Unix) |
 | `jm config [k=v ...]` / `jm clean [--older 7d]` / `jm artifacts ID` | machine config, drop finished jobs, list outputs |
+| `jm -H HOST <any command>` | run it on HOST over ssh (a name in `~/.jm/hosts`, or `user@ip`); see docs/REMOTE.md |
 
 Exit codes: 0 ok, 1 error, 2 usage, 3 no such job, 4 not allowed in that state.
 
@@ -107,7 +110,7 @@ for them. See design/JM_DESIGN.md sec 16.
 | `tests/` | `python3 -m unittest discover tests` (unit tests and daemon tests with `jm _sim` fake jobs) |
 | `examples/` | sample specs |
 | `guards/` | claude-guards: Claude Code safety hooks (secret echo, broad search, protected files), installed into `.claude/` |
-| `docs/` | user documentation: `GUIDE.md`, `PORTING.md` |
+| `docs/` | user documentation: `GUIDE.md`, `REMOTE.md`, `PORTING.md` |
 | `design/` | design notes: `JM_DESIGN.md`, `CLAUDE_GUARDS.md` |
 | `rdd/` | resolved design decisions taken while building |
 | `state/` | implementation state: what is built, tested, next |

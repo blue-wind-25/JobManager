@@ -240,8 +240,9 @@ jm clean [--older 7d]                          drop finished jobs' dirs
 Exit codes: 0 ok, 1 error, 2 usage, 3 no such job, 4 not allowed in that state. `--json` is deliberately absent
 (plain text only); every list prints one job per line with tab-separated fields for `cut` / `awk`.
 
-Remote use (the intended way for now **[decided]**): copy files with scp, then `ssh host jm submit spec`,
-`ssh host jm list`, `ssh -t host jm log -f ID`.
+Remote use (the intended way for now **[decided]**): `jm -H HOST <any command>` runs the command on HOST over ssh
+(the remote part of sec 12.4, built in v1: RDD_012, docs/REMOTE.md), e.g. `jm -H pi submit spec`, `jm -H pi list`,
+`jm -H pi log -f ID`; plain `ssh host jm ...` works too.
 
 ## 10. Platform notes
 
@@ -322,7 +323,8 @@ adds one shared file:
 Still one daemon per machine; the CLI gains a host list:
 - `~/.jm/hosts`: `<name> <ssh target> [jm path] [JM_HOME]` per line, e.g. `cm5 pi@raspberrypi.local`.
 - `jm --host cm5 <any command>` = `ssh -o BatchMode=yes cm5-target jm <command>` (`-t` added for `log -f`). Specs
-  given as a file are sent on stdin (`jm submit -`), so nothing needs copying for the spec itself.
+  given as a file are sent on stdin (`jm submit -`), so nothing needs copying for the spec itself. **Built in v1**
+  (RDD_012: `-H`, `-t` whenever a person is at a terminal); the rest of this section stays v3.
 - `jm free` (new, also useful locally) prints the machine's free capacity and queue size:
   `cpus 1.5/4 ram 1400/3500 tokens trainer:0/1 gpu:1/1 queue 3 head_wait 12m`.
 - `jm --host any submit SPEC` asks every host's `jm free` and submits to the host where the job fits now, else the
@@ -434,7 +436,7 @@ Python floor 3.6 matches CentOS 7's base-repo `python3`, so even that box runs i
    Every job must be safe to start again (skip finished steps, resume from a snapshot) and should have a
    `done_check`.
 4. **One thin helper per project** to submit from a workstation, e.g. `tools/jm_submit.sh HOST SPEC [key=value ...]`:
-   `git pull` on the host, then `jm --host HOST submit` with the overrides (or `ssh host jm submit -` before v3).
+   `git pull` on the host, then `jm -H HOST submit` with the overrides (RDD_012).
 5. **Keep the old scripts until one full cycle has run under jm** (submit, run, reboot in the middle, resume,
    chained job, result fetched), then delete them in one commit.
 

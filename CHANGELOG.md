@@ -16,3 +16,6 @@
   children too), spec key `split_stderr` with `jm log --stdout / --stderr`; spec key `applog` (a command that
   prints the job's own log) and `jm applog ID [-f] [-n N] [--children]`, run without `env_pass` / `env_file`
   secrets. `jm log -f` counts bytes (Windows `\r\n`) and survives `log_max` rotation.
+- Remote use (RDD_012): `jm -H HOST <any command>` runs it on HOST over ssh (`~/.jm/hosts` names, or any ssh
+  target); local spec files are sent on stdin, words are quoted for the worker's shell, `-t` is added when a person
+  is at a terminal. docs/REMOTE.md.

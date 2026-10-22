@@ -185,6 +185,37 @@ class TestQueueOps(JmTestCase):
         self.assertEqual(self.jm("daemon", "install")[0], 2)
 
 
+FAKE_SSH = """import subprocess, sys
+a = sys.argv[1:]
+while a[0].startswith("-"):
+    a = a[2:] if a[0] == "-o" else a[1:]
+sys.exit(subprocess.call(["sh", "-c", a[1]]))
+"""
+
+
+@unittest.skipIf(IS_WIN, "the fake ssh runs the remote command with sh")
+class TestRemote(JmTestCase):
+    """`jm -H HOST ...` through a fake ssh that runs the remote command line here (RDD_012)."""
+    daemon = False
+
+    def test_host(self):
+        local = os.path.join(self.work, "local")
+        os.makedirs(local)
+        wrapper = self.write("jm-remote", '#!/bin/sh\nexec "%s" "%s" "$@"\n' % (sys.executable, jm.JM_PATH), 0o755)
+        with open(os.path.join(local, "hosts"), "w") as f:
+            f.write("box  me@box  %s\n" % wrapper)
+        env = {"JM_HOME": local, "JM_SSH": '"%s" "%s"' % (sys.executable, self.write("fake_ssh.py", FAKE_SSH))}
+        spec = self.write("s.jm", "name = from afar\ncwd = /tmp\nstart = sleep 1\n")
+        a = self.jm_ok("-H", "box", "submit", spec, "--hold", env=env).strip()
+        self.assertEqual(self.state(a), "held")
+        self.assertIn("name = from afar", self.jobfile(a, "spec"))
+        b = self.jm_ok("-H", "box", "submit", "--name", "two words", "--", "sh", "-c", "echo 1; echo $HOME",
+                       env=env).strip()
+        self.assertEqual(jm.parse_spec(self.jobfile(b, "spec"))["start"], "sh -c 'echo 1; echo $HOME'")
+        self.assertEqual(len(self.jm_ok("-H", "box", "list", env=env).splitlines()), 2)
+        self.assertEqual(self.jm("-H", "box", "status", "nosuch", env=env)[0], 3)  # exit codes come through
+
+
 class TestSecretsSubmit(JmTestCase):
     daemon = False
 
