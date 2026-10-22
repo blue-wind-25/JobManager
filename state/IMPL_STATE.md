@@ -18,7 +18,7 @@ Last update: 2026-10-23.
 | Release 1.0.0 (`VERSION`, CHANGELOG; tag `v1.0.0` on the release PR's merge) | done | |
 | Read-only home while idle: `home_rw`, no writer held by an idle daemon | done (1.1.0) | RDD_014; `TestReadOnlyHome` |
 | Spec key `report`, `jm report [ID] [-n N]`, shortcut `jr` | done (1.2.0) | RDD_015; `TestReport`, `TestShortcuts` |
-| Dogfooding on the CM5 (JM_DESIGN.md sec 15.2) | started 2026-10-23 (HowToTrainYourPetAI RDD_646) | 1.0.0 showed RDD_014; runs 1.1.0 |
+| Dogfooding on the CM5 (JM_DESIGN.md sec 15.2) | in progress, 1.2.0 (HowToTrainYourPetAI RDD_646-653) | 1.0.0 showed RDD_014; passed: submit, run, reboot and a physical power cut mid-run (resumed by itself, systemd user unit + linger, GUIDE sec 9), logs and `report` from the phone; left: the chained job (`after`), results fetched |
 
 ## Tested
 
@@ -81,6 +81,6 @@ RDD_001 .. RDD_010 reviewed by the owner on 2026-10-21, RDD_011 .. RDD_013 on 20
 
 ## Next
 
-1. Dogfood v1.1.0 on the CM5 (design sec 15.2): one or two non-critical jobs under jm with the old scripts kept,
-   a power cut mid-run, logs checked from the phone, a chained job; then move the real work over.
+1. Finish the CM5 dogfood cycle (design sec 15.2): the chained job (gso_b run 2 `after` the tagger job) runs and
+   both results are fetched; then the project retires its old queue scripts.
 2. Then v2.
