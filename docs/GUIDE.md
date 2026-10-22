@@ -178,8 +178,9 @@ fi
 # ... remount read-only ...
 ```
 
-Ready-made versions of both: [examples/data-rw.sh](../examples/data-rw.sh) and
-[examples/data-ro.sh](../examples/data-ro.sh) (jm-aware as above, the mount named by `DATA_MOUNT`).
+Ready-made versions of both, named so they never replace the machine's own scripts:
+[examples/jm-data-rw.sh](../examples/jm-data-rw.sh) and [examples/jm-data-ro.sh](../examples/jm-data-ro.sh)
+(jm-aware as above, the mount named by `DATA_MOUNT`).
 
 The writable script (`data-rw.sh` here) called from a job is harmless (the mount is already writable), so it needs
 no change; removing such calls from job scripts is still cleaner (see [PORTING.md](PORTING.md)). The same applies

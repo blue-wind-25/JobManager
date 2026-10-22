@@ -9,7 +9,7 @@
   `daemon.log`, the hook output file), so an `on_idle` remount read-only failed with EBUSY. Lock files are opened
   read-only, the daemon lets go of a stdout / stderr on its home once started, hook output goes through a pipe
   into `daemon.log` lines.
-- examples/data-rw.sh, examples/data-ro.sh: machine hooks for a data mount that is read-only when idle (the
+- examples/jm-data-rw.sh, examples/jm-data-ro.sh: machine hooks for a data mount that is read-only when idle (the
   read-only one jm-aware: skips inside a job and while jm is busy).
 
 ## 1.0.0 - 2026-10-22
