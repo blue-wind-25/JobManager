@@ -82,7 +82,45 @@ ssh pi "jm submit -- sh -c 'a; b'"      # one quoted string: ssh joins the words
 
 Without `-t`, Ctrl-C ends only the local ssh; a `jm log -f` on the worker ends by itself when the job ends.
 
-## 4. Limits
+## 4. From a phone
+
+A phone ssh app (ConnectBot, JuiceSSH, Termux, ...) logs into the worker itself, so jm runs there and the
+commands are the local ones; the work is in keeping them short to type. Set up the worker once:
+
+1. Copy [examples/jm-shortcuts.sh](../examples/jm-shortcuts.sh) next to jm (e.g. `~/bin/`) and source it from the
+   worker's `~/.bashrc`, after the line that puts jm on PATH:
+
+   ```sh
+   . ~/bin/jm-shortcuts.sh
+   ```
+
+2. That gives these commands; **the ID is optional**: without it they take the first running job at the top
+   of the queue, and for a group the whole group (`--children`):
+
+   | Type | Runs | |
+   |---|---|---|
+   | `jl` | `jm list --tree \| cut -f1,2,5` | the queue: id, state, progress (narrow) |
+   | `js [ID]` | `jm status ID` | state, runs, live RSS / CPU, last log lines |
+   | `jf [ID]` | `jm log -f --children ID` | follow what the job prints; ends when the job ends |
+   | `ja [ID]` | `jm applog -f --children ID` | follow the job's own log (`applog`) |
+   | `jt [ID] [N]` | `jm log -n N --children ID` | the last N (30) lines, without following |
+
+   Everything else is the plain command (`jm stop j0007`, `jm list` for the full rows with names and reasons).
+   Short ids help too: `jm submit --id t5 ...` instead of the automatic `j0007`.
+
+3. In the app, save the worker as a host with key login. In ConnectBot: *Manage Pubkeys* creates a key; append
+   its public half to the worker's `~/.ssh/authorized_keys`. Then put `jl` in the host's *Post-login automation*
+   (other apps call it a startup or login command): connecting shows the queue at once, and `jf` follows the
+   running job. Stop following with Ctrl-C (the app's Ctrl key, then `c`), or let it end with the job.
+
+A dropped connection (the phone sleeps, the network changes) only ends what you were following: jobs run under
+jm's detached wrappers, never under your ssh session.
+
+With Termux, one command per action also works, from the phone's own shell: `ssh -t pi bash -ic jf` runs the
+shortcut in an interactive shell (which reads `~/.bashrc`), so `alias pf='ssh -t pi bash -ic jf'` in Termux's
+`~/.bashrc` makes it two letters. Or install Python and jm.py in Termux and use `jm -H pi` as from a workstation.
+
+## 5. Limits
 
 - The worker must have a POSIX shell (Linux, macOS): jm quotes for `sh`. A Windows workstation can drive Unix
   workers (`ssh.exe` is part of Windows 10 and later); Windows workers are driven with plain ssh.

@@ -28,5 +28,10 @@ Per-project helper scripts would each re-solve these.
   and `BatchMode=yes` (never a password prompt). This replaces sec 12.4's "`-t` added for `log -f`".
 - ssh's exit code is returned as is (the remote jm's code, 255 for an ssh failure); 255 and 127 (jm not found)
   get a hint on stderr. `JM_SSH` replaces the `ssh` command (e.g. `ssh -p 2222`).
+- From a phone (owner, 2026-10-22) the ssh app logs into the worker, so short commands belong in the worker's
+  shell, not in jm: `examples/jm-shortcuts.sh` (sourced from `~/.bashrc`) defines `jl js jf ja jt`, whose ID
+  defaults to the first running top-level job (a group with its children). jm itself gets no "default job":
+  a command acting on a guessed job is fine to look at, not to stop or cancel, and the shell functions keep
+  that choice visible and editable. Documented in docs/REMOTE.md sec 4 (ConnectBot post-login `jl`, Termux).
 - The job's cwd default stays "the directory of the submit": over ssh that is the login directory. Documented
   (docs/REMOTE.md sec 2) instead of guessed: specs for remote use should give `cwd`.

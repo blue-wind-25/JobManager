@@ -8,7 +8,7 @@ Last update: 2026-10-22.
 | jm v1 - design/JM_DESIGN.md sec 1-11 | done | RDD_002 .. RDD_008 |
 | jm secrets - sec 16 | done | RDD_005 |
 | jm logs: `jm log --children / --stdout / --stderr` (`split_stderr`), `applog` and `jm applog` | done; tested on Linux, CI matrix not run yet | RDD_011 |
-| `jm -H HOST` (remote part of sec 12.4), docs/REMOTE.md | done; tested with a fake ssh (Unix), CI matrix not run yet | RDD_012 |
+| `jm -H HOST` (remote part of sec 12.4), docs/REMOTE.md; phone shortcuts `examples/jm-shortcuts.sh` | done; tested with a fake ssh (Unix), shortcuts by hand in dash and bash; CI matrix not run yet | RDD_012 |
 | jm tests and CI - sec 12.5 | done; full CI matrix green (PR #2) | see below |
 | claude-guards - design/CLAUDE_GUARDS.md sec 2-5, 7 | done (in `guards/`, installed in `.claude/`) | RDD_009 |
 | jm v2 - sec 12.1 estimates / EASY backfill, sec 12.2 progress parsing and ETA | not started | `progress` samples are already stored in the v2 format |
