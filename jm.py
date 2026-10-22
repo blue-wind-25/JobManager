@@ -41,7 +41,7 @@ import threading
 import time
 import traceback
 
-VERSION = "1.0.0.dev0"
+VERSION = "1.0.0"
 IS_WIN = os.name == "nt"
 IS_LINUX = sys.platform.startswith("linux")
 JM_PATH = os.path.abspath(__file__)
