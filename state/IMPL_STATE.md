@@ -21,6 +21,18 @@ Last update: 2026-10-23.
 | Hosts file, `jm ssh` / `scp` / `keygen` / `remote` | done (1.3.0) | RDD_016; `tests/test_remote.py`, CI `jm-ssh`; checked by hand against the CM5 |
 | Dogfooding on the CM5 (JM_DESIGN.md sec 15.2) | in progress, 1.2.0 (HowToTrainYourPetAI RDD_646-653) | 1.0.0 showed RDD_014; passed: submit, run, reboot and a physical power cut mid-run (resumed by itself, systemd user unit + linger, GUIDE sec 9), logs and `report` from the phone; left: the chained job (`after`), results fetched |
 
+## Release procedure (every release)
+
+1. CHANGELOG section + `VERSION` in jm.py; README's install URL to the new tag; full test suite green locally.
+2. Commit, push `main`, run CI (`gh workflow run ci.yml --ref main`), wait until every job is green.
+3. `gh release create vX.Y.Z --target main --title "jm X.Y.Z" --notes-file NOTES` (notes = the CHANGELOG section
+   plus the CI run id); check `git rev-parse --short vX.Y.Z^{commit}` = `origin/main`.
+4. **Install on the owner's PC** from the tag, never the working tree:
+   `git show vX.Y.Z:jm.py > ~/bin/jm && chmod 755 ~/bin/jm && jm --version` (`~/bin` is on PATH; no daemon runs on
+   the PC, so no restart).
+5. Workers are upgraded by their projects, not from here: HowToTrainYourPetAI `tools/cm5/cm5_jm_update.sh` for the
+   CM5 (owner runs it when the queue allows; it keeps the old file as `jm-<old version>`).
+
 ## Tested
 
 - 2026-10-22, PR #3: the intermittent `test_token` failure was a real race (RDD_004 addendum): a wrapper checked

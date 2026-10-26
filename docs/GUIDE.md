@@ -322,3 +322,8 @@ sudo mount -o remount,ro /
   `/etc/rpi/swap.conf.d/*.conf`, then stop `dev-zram0.swap` and `rpi-setup-loop@var-swap.service`).
 - With the state dir on a data mount that is read-only after boot, set `home_rw` (sec 6): the service's daemon runs
   it at start-up (daemon.log: `home_rw: ... exited 0`), then resumes the cut-off jobs.
+
+## 10. Other machines
+
+jm drives one machine. To use a worker from your workstation, name it once in `~/.jmhosts` and use `jm remote
+COMMAND`, `jm ssh`, `jm scp` and `jm keygen` (1.3.0, RDD_016), or plain `ssh -t host jm ...`: docs/REMOTE.md.

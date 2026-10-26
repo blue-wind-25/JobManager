@@ -240,14 +240,20 @@ jm set ID key=value ...                        change spec keys without an edito
 jm pause ID / jm cont ID                       SIGSTOP / SIGCONT (Unix only; optional, risky for timeouts)
 jm config [key=value ...]                      show / change machine capacity and defaults
 jm clean [--older 7d]                          drop finished jobs' dirs
+
+jm ssh [--host NAME] [-t] [--] [COMMAND...]    ssh to a host in ~/.jmhosts (alias ssx; RDD_016)
+jm scp [--host NAME] SRC... DST                scp -r, `:path` = on the host
+jm remote [--host NAME] COMMAND...             any jm command on the host (a local spec goes on stdin)
+jm keygen [--host NAME] [--install] [...]      ed25519 key via ssh-keygen; --install appends it to authorized_keys
 ```
 
 Exit codes: 0 ok, 1 error, 2 usage, 3 no such job, 4 not allowed in that state. `--json` is deliberately absent
 (plain text only); every list prints one job per line with tab-separated fields for `cut` / `awk`.
 
-Remote use (the intended way for now **[decided]**): copy files with scp, then `ssh host jm submit spec`,
-`ssh host jm list`, `ssh -t host jm log -f ID`. What differs over ssh, and short commands from a phone:
-docs/REMOTE.md (RDD_012).
+Remote use **[decided]**: copy files with scp, then `ssh host jm submit spec`, `ssh host jm list`,
+`ssh -t host jm log -f ID` (RDD_012); since 1.3.0 the same through `~/.jmhosts`: `jm scp`, `jm remote submit spec`,
+`jm remote list`, `jm remote log -f ID` (RDD_016). What differs over ssh, and short commands from a phone:
+docs/REMOTE.md.
 
 ## 10. Platform notes
 

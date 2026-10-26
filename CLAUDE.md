@@ -59,6 +59,8 @@ keep the JM_HOME of failed tests. Job commands in tests must work in both `sh` a
 - Line length 120. Comments explain *why*; match the density of the surrounding code.
 - Branches: in a session on the owner's PC, commit and push to `main` directly (owner direction, 2026-10-21); cloud
   sessions work on their assigned branch and open a PR.
+- A release follows `state/IMPL_STATE.md` "Release procedure", which ends by installing the tagged jm.py into the
+  owner's `~/bin/jm`.
 - Commit and push after each meaningful slice; CI (`.github/workflows/ci.yml`, manual trigger for now:
   `gh workflow run ci.yml --ref <branch>`) runs the full matrix: Linux x86_64 / aarch64, macOS arm64 / x86_64,
   Windows, Python 3.6, Alpine (busybox), Fedora, and the guards on Python 2.7 / 3.

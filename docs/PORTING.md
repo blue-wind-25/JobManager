@@ -131,6 +131,10 @@ becomes `ssh pi jm list` (or `jp list` with `alias jp='ssh -t pi jm'`); logs
 `jp log -f ID` (what the job printed) and `jp applog -f ID` (the log it writes itself), with `--children` for a
 whole group. See [REMOTE.md](REMOTE.md) for what differs over ssh, and for checking jobs from a phone.
 
+With the worker named in `~/.jmhosts` (jm 1.3.0, [REMOTE.md](REMOTE.md) sec 4) the helper needs no ssh options:
+`jm ssh --host pi "cd /mnt/data/project && git pull -q" && jm remote --host pi submit $spec $sets`, status
+`jm remote list`, logs `jm remote log -f ID`, files `jm scp :/mnt/data/project/out/model.bin .`.
+
 ## 6. Switch over safely
 
 1. Keep the old scripts until **one full cycle** has run under jm: submit, run, a reboot in the middle, the resume,

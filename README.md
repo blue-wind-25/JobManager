@@ -14,16 +14,19 @@ on **one machine**: a Raspberry Pi CM5, a Jetson, a Linux box, macOS, Windows.
 - **Sub-jobs**: static groups (`children = FILE`, `parallel = N`) and children a running job submits itself.
 - **Secret-safe**: refuses secrets in specs, passes them by name (`env_pass`, `env_file`), masks tokens in logs.
 
-There is no network port and no web UI: remote use is `ssh -t host jm ...`, with the same commands.
+There is no network port and no web UI: remote use is `ssh -t host jm ...`, with the same commands, or `jm remote ...`
+/ `jm ssh` / `jm scp` with the hosts named once in `~/.jmhosts` ([docs/REMOTE.md](docs/REMOTE.md) sec 4).
 
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/blue-wind-25/JobManager/v1.2.0/jm.py -o ~/bin/jm && chmod +x ~/bin/jm
+curl -fsSL https://raw.githubusercontent.com/blue-wind-25/JobManager/v1.3.0/jm.py -o ~/bin/jm && chmod +x ~/bin/jm
 jm daemon start                 # or: jm daemon install systemd | launchd | windows
 ```
 
 (A release tag in the URL, not `main`, so every machine runs a known version; `jm --version` shows it.)
+**Upgrade:** the same line with the new tag, then `jm daemon restart` (or restart its service) where a daemon runs;
+running jobs keep running (their wrappers do not depend on the daemon).
 The state dir is `~/.jm`; set `JM_HOME` or `--home DIR` for another one (e.g. a writable data mount).
 
 ## Quick start
@@ -89,6 +92,10 @@ Every key is described in [design/JM_DESIGN.md](design/JM_DESIGN.md) sec 5 (spec
 | `jm edit ID` / `jm set ID k=v k+=v k=` | change a spec that is not running |
 | `jm pause ID` / `jm cont ID` | SIGSTOP / SIGCONT (Unix) |
 | `jm config [k=v ...]` / `jm clean [--older 7d]` / `jm artifacts ID` | machine config, drop finished jobs, list outputs |
+| `jm ssh [--host NAME] [-t] [--] [CMD...]` (alias `ssx`) | ssh to a host named in `~/.jmhosts` (first host by default) |
+| `jm scp [--host NAME] SRC... DST` | copy to / from it; `:path` is on the host, `-r` always |
+| `jm remote [--host NAME] COMMAND...` | any jm command on the host; `remote submit LOCAL_FILE` sends the spec on stdin |
+| `jm keygen [--host NAME] [--file F] [--no-passphrase] [--install]` | a new ed25519 sign-in key (ssh-keygen); `--install` puts it on the host (ssh asks the password on your terminal) |
 
 Exit codes: 0 ok, 1 error, 2 usage, 3 no such job, 4 not allowed in that state.
 
