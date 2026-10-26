@@ -82,6 +82,30 @@ jobs:
           path: ${{ runner.temp }}/jm-failed
           if-no-files-found: ignore
 
+  # RDD_016: jm ssh / scp / remote against a real sshd on localhost, with a key made by `jm keygen` and authorised
+  # by hand (no password anywhere). The command-line and keygen tests run in the `jm` matrix on every OS.
+  jm-ssh:
+    name: jm ssh round trip (localhost)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: sshd
+        run: |
+          sudo apt-get install -y -q openssh-server
+          sudo systemctl start ssh
+      - name: hosts file + key
+        run: |
+          chmod +x jm.py
+          H="$RUNNER_TEMP/jmhosts"
+          printf '[ci]\nUser = %s\nHost = localhost\nStrictHostKeyChecking = no\nUserKnownHostsFile = /dev/null\nLogLevel = ERROR\nSignInKey = ~/.ssh/jm_ci\nJm = %s\nJmHome = %s\n' \
+            "$(id -un)" "$PWD/jm.py" "$RUNNER_TEMP/jmhome" > "$H"
+          chmod 600 "$H"
+          JM_HOSTS="$H" python3 jm.py keygen --no-passphrase
+          mkdir -p ~/.ssh && cat ~/.ssh/jm_ci.pub >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys
+          JM_HOSTS="$H" python3 jm.py ssh echo ok
+      - name: round trip
+        run: JM_TEST_SSH_HOSTS="$RUNNER_TEMP/jmhosts" python3 -m unittest discover -v -s tests -p test_remote.py
+
   guards:
     name: claude-guards
     runs-on: ubuntu-24.04

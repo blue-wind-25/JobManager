@@ -42,7 +42,7 @@ import threading
 import time
 import traceback
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 IS_WIN = os.name == "nt"
 IS_LINUX = sys.platform.startswith("linux")
 JM_PATH = os.path.abspath(__file__)
@@ -3162,6 +3162,224 @@ def cmd_daemon(store, a):
     raise JmError("daemon: start, stop, restart, status, run, install or bashrc", EXIT_USAGE)
 
 
+# remote hosts: jm ssh / scp / keygen / remote (RDD_016) -------------------------------------------------------
+# jm calls the system OpenSSH client (ssh, scp, ssh-keygen): Python's standard library has no SSH, and the client
+# ships with Linux, macOS and Windows 10 1809+ / 11. Nothing here touches the state dir or the daemon.
+
+HOST_KEYS = ("User", "Host", "Port", "SignInKey", "Jm", "JmHome")  # the rest pass to ssh / scp as `-o Key=Value`
+REMOTE_COMMANDS = ("ssh", "ssx", "scp", "keygen", "remote")
+
+
+def hosts_path():
+    return os.environ.get("JM_HOSTS") or os.path.join(os.path.expanduser("~"), ".jmhosts")
+
+
+def load_hosts(path=None):
+    """The hosts file as an ordered list of (name, {key: value}); [] when it does not exist."""
+    import configparser
+    path = path or hosts_path()
+    if not os.path.exists(path):
+        return []
+    if not IS_WIN and os.stat(path).st_mode & 0o022:
+        # It names a private key and decides where commands run: nobody else may change it.
+        raise JmError("%s: writable by group or others (chmod go-w)" % path)
+    cp = configparser.ConfigParser(interpolation=None, default_section="\0none", inline_comment_prefixes=("#", ";"))
+    cp.optionxform = str  # keep the keys' case: they are ssh option names
+    try:
+        with codecs.open(path, "r", "utf-8") as f:
+            cp.read_file(f)
+    except (configparser.Error, UnicodeDecodeError) as e:
+        raise JmError("%s: %s" % (path, str(e).splitlines()[0]))
+    hosts = []
+    for name in cp.sections():
+        keys = dict((k, v.strip()) for k, v in cp.items(name))
+        if not keys.get("Host"):
+            raise JmError("%s: [%s] has no Host" % (path, name))
+        hosts.append((name, keys))
+    return hosts
+
+
+def pick_host(name=None, path=None):
+    hosts = load_hosts(path)
+    if not hosts:
+        raise JmError("no hosts: write %s ([name] with Host = ..., see docs/REMOTE.md)" % (path or hosts_path()),
+                      EXIT_USAGE)
+    if name is None:
+        return hosts[0]
+    for h in hosts:
+        if h[0] == name:
+            return h
+    raise JmError("no host [%s] in %s (have: %s)" % (name, path or hosts_path(), ", ".join(h[0] for h in hosts)),
+                  EXIT_USAGE)
+
+
+def ssh_options(keys, scp=False):
+    """The client options for one host: -i, the port, and every other key as -o Key=Value."""
+    opts = []
+    if keys.get("SignInKey"):
+        opts += ["-i", os.path.expanduser(keys["SignInKey"])]
+    if keys.get("Port"):
+        opts += ["-P" if scp else "-p", keys["Port"]]
+    for k in sorted(keys):
+        if k in HOST_KEYS:
+            continue
+        v = keys[k]
+        if v == "/dev/null":
+            v = os.devnull  # NUL on Windows
+        opts += ["-o", "%s=%s" % (k, v)]
+    return opts
+
+
+def ssh_target(keys):
+    return ("%s@%s" % (keys["User"], keys["Host"])) if keys.get("User") else keys["Host"]
+
+
+def split_host_args(args, flags=()):
+    """Leading --host NAME / --host=NAME and the given flags, then an optional `--`; returns (host, set, rest)."""
+    host, seen, i = None, set(), 0
+    while i < len(args):
+        a = args[i]
+        if a == "--host" and i + 1 < len(args):
+            host, i = args[i + 1], i + 2
+        elif a.startswith("--host="):
+            host, i = a[len("--host="):], i + 1
+        elif a in flags:
+            seen.add(a)
+            i += 1
+        elif a == "--":
+            i += 1
+            break
+        else:
+            break
+    return host, seen, args[i:]
+
+
+def ssh_argv(keys, command, tty=False):
+    argv = ["ssh"] + ssh_options(keys) + (["-t"] if tty else []) + [ssh_target(keys)]
+    return argv + list(command)
+
+
+def scp_argv(keys, paths):
+    """`:path` is a path on the host (a bare `:` = the login directory); anything else is local."""
+    target = ssh_target(keys)
+    conv = [(target + p) if p.startswith(":") else p for p in paths]
+    return ["scp", "-r"] + ssh_options(keys, scp=True) + conv
+
+
+def remote_jm_argv(keys, jm_args):
+    """The words of `jm ...` on the host, quoted once for its POSIX login shell."""
+    words = [keys.get("Jm") or "jm"]
+    if keys.get("JmHome"):
+        words += ["--home", keys["JmHome"]]
+    return [" ".join(shlex.quote(w) for w in words + list(jm_args))]
+
+
+def run_client(argv, stdin=None):
+    exe = shutil.which(argv[0])
+    if exe is None:
+        raise JmError("%s not found on PATH (install the OpenSSH client)" % argv[0])
+    try:
+        return subprocess.call([exe] + argv[1:], stdin=stdin)
+    except KeyboardInterrupt:
+        return EXIT_ERR
+
+
+def keygen_argv(path, comment, passphrase):
+    argv = ["ssh-keygen", "-t", "ed25519", "-f", path, "-C", comment]
+    return argv + (["-N", ""] if passphrase is False else [])
+
+
+def install_key_command(pub):
+    """Append the public key to ~/.ssh/authorized_keys on a POSIX host, once."""
+    k = shlex.quote(pub.strip())
+    return ("umask 077 && mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys && "
+            "(grep -qxF %s ~/.ssh/authorized_keys || echo %s >> ~/.ssh/authorized_keys)" % (k, k))
+
+
+def cmd_ssh(args):
+    name, seen, rest = split_host_args(args, ("-t",))
+    host, keys = pick_host(name)
+    return run_client(ssh_argv(keys, rest, tty="-t" in seen))
+
+
+def cmd_scp(args):
+    name, _, rest = split_host_args(args)
+    if len(rest) < 2:
+        raise JmError("usage: jm scp [--host NAME] SRC... DST   (`:path` = on the host)", EXIT_USAGE)
+    if not any(p.startswith(":") for p in rest):
+        raise JmError("scp: no `:path` among the paths, nothing is on the host", EXIT_USAGE)
+    host, keys = pick_host(name)
+    return run_client(scp_argv(keys, rest))
+
+
+def cmd_remote(args):
+    name, _, rest = split_host_args(args)
+    if not rest:
+        raise JmError("usage: jm remote [--host NAME] COMMAND ...   (any jm command, run on the host)", EXIT_USAGE)
+    host, keys = pick_host(name)
+    if rest[0] == "submit" and len(rest) >= 2 and rest[1] != "-" and os.path.isfile(rest[1]):
+        # A local spec goes on stdin (`jm submit -`), so nothing has to be copied first (RDD_012).
+        with open(rest[1], "rb") as f:
+            return run_client(ssh_argv(keys, remote_jm_argv(keys, ["submit", "-"] + rest[2:])), stdin=f)
+    # A terminal gets -t (log -f, prompts, colours); a script or pipe does not (no \r\n, stderr kept apart).
+    tty = sys.stdin.isatty() and sys.stdout.isatty()
+    return run_client(ssh_argv(keys, remote_jm_argv(keys, rest), tty=tty))
+
+
+def cmd_keygen(args):
+    p = Parser(prog="jm keygen", description="a new ed25519 sign-in key for a host (ssh-keygen)")
+    p.add_argument("--host", help="default: the first host in the hosts file")
+    p.add_argument("--file", help="default: the host's SignInKey, else ~/.ssh/jm_<host>")
+    p.add_argument("--comment", help="default: jm-<host>")
+    p.add_argument("--no-passphrase", action="store_true", help="an unencrypted key (unattended use)")
+    p.add_argument("--install", action="store_true",
+                   help="append the public key to the host's ~/.ssh/authorized_keys over ssh (asks for its password)")
+    a = p.parse_args(args)
+    hosts = load_hosts()
+    if a.host is None and not hosts and a.file is None:
+        raise JmError("keygen: no hosts file and no --host / --file", EXIT_USAGE)
+    keys = {}
+    name = a.host
+    if hosts and (a.install or a.host is None or any(h[0] == a.host for h in hosts)):
+        name, keys = pick_host(a.host)
+    elif a.install:
+        raise JmError("keygen --install: no host [%s] in %s" % (a.host, hosts_path()), EXIT_USAGE)
+    path = os.path.expanduser(a.file or keys.get("SignInKey") or os.path.join("~", ".ssh", "jm_%s" % name))
+    if os.path.exists(path) and not a.install:
+        raise JmError("keygen: %s exists; remove it first, pass another --file, or --install it" % path)
+    if not os.path.exists(path):
+        d = os.path.dirname(path)
+        if d and not os.path.isdir(d):
+            os.makedirs(d, 0o700)
+        rc = run_client(keygen_argv(path, a.comment or "jm-%s" % name, False if a.no_passphrase else None))
+        if rc != 0:
+            return rc
+    if keys and os.path.abspath(os.path.expanduser(keys.get("SignInKey") or "")) != os.path.abspath(path):
+        out("jm: add `SignInKey = %s` to [%s] in %s" % (path, name, hosts_path()))
+    if not a.install:
+        out("jm: to allow it on the host: jm keygen --install --file %s%s   (or append %s.pub to the host's "
+            "~/.ssh/authorized_keys)" % (path, "" if a.host is None else " --host " + name, path))
+        return EXIT_OK
+    with open(path + ".pub", "r") as f:
+        pub = f.read()
+    # The new key is not authorised yet: sign in with the host's other SignInKey if it has one, else ssh falls back
+    # to the host's password, asked on this terminal (jm never sees it).
+    k = dict(keys)
+    if os.path.abspath(os.path.expanduser(k.get("SignInKey") or "")) == os.path.abspath(path):
+        k.pop("SignInKey")
+    return run_client(ssh_argv(k, [install_key_command(pub)]))
+
+
+def remote_main(cmd, args):
+    if cmd in ("ssh", "ssx"):
+        return cmd_ssh(args)
+    if cmd == "scp":
+        return cmd_scp(args)
+    if cmd == "remote":
+        return cmd_remote(args)
+    return cmd_keygen(args)
+
+
 # argument parsing ----------------------------------------------------------------------------------------------
 
 class Parser(argparse.ArgumentParser):
@@ -3281,6 +3499,13 @@ def build_parser():
     ar = sub.add_parser("artifacts", help="list a job's artifacts")
     ar.add_argument("id")
 
+    # RDD_016: listed for --help only; main() hands these words to remote_main() before argparse sees them.
+    for name, h in (("ssh", "[--host NAME] [-t] [--] COMMAND...: ssh to a host from the hosts file (alias: ssx)"),
+                    ("scp", "[--host NAME] SRC... DST: copy, `:path` = on the host (always -r)"),
+                    ("keygen", "[--host NAME] [--file F] [--no-passphrase] [--install]: an ed25519 sign-in key"),
+                    ("remote", "[--host NAME] COMMAND...: any jm command on the host (a local spec goes on stdin)")):
+        sub.add_parser(name, help=h, add_help=False)
+
     r = sub.add_parser("_run")
     r.add_argument("id")
     r.add_argument("token")
@@ -3311,6 +3536,9 @@ COMMANDS = {
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     try:
+        # RDD_016: the ssh client commands take their own words (a remote command, scp paths) and need no state dir.
+        if argv and argv[0] in REMOTE_COMMANDS:
+            return remote_main(argv[0], argv[1:])
         # `submit ... -- COMMAND`: argparse cannot mix REMAINDER with options, so split at the first `--`.
         command = None
         if "submit" in argv and "--" in argv and argv.index("--") > argv.index("submit"):

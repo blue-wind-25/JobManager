@@ -327,6 +327,10 @@ adds one shared file:
 
 ### 12.4 Several machines (v3)
 
+**Since 1.3.0 (RDD_016):** the host list is `~/.jmhosts` (INI sections, the owner's format), and `jm ssh`, `jm scp`,
+`jm keygen`, `jm remote [--host NAME] COMMAND` exist; the `~/.jm/hosts` line format below is replaced. What stays v3:
+`jm --host` before every command, `--host any`, `stage`.
+
 Still one daemon per machine; the CLI gains a host list:
 - `~/.jm/hosts`: `<name> <ssh target> [jm path] [JM_HOME]` per line, e.g. `cm5 pi@raspberrypi.local`.
 - `jm --host cm5 <any command>` = `ssh -o BatchMode=yes cm5-target jm <command>` (`-t` added for `log -f`). Specs

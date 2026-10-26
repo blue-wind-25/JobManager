@@ -18,6 +18,7 @@ Last update: 2026-10-23.
 | Release 1.0.0 (`VERSION`, CHANGELOG; tag `v1.0.0` on the release PR's merge) | done | |
 | Read-only home while idle: `home_rw`, no writer held by an idle daemon | done (1.1.0) | RDD_014; `TestReadOnlyHome` |
 | Spec key `report`, `jm report [ID] [-n N]`, shortcut `jr` | done (1.2.0) | RDD_015; `TestReport`, `TestShortcuts` |
+| Hosts file, `jm ssh` / `scp` / `keygen` / `remote` | done (1.3.0) | RDD_016; `tests/test_remote.py`, CI `jm-ssh`; checked by hand against the CM5 |
 | Dogfooding on the CM5 (JM_DESIGN.md sec 15.2) | in progress, 1.2.0 (HowToTrainYourPetAI RDD_646-653) | 1.0.0 showed RDD_014; passed: submit, run, reboot and a physical power cut mid-run (resumed by itself, systemd user unit + linger, GUIDE sec 9), logs and `report` from the phone; left: the chained job (`after`), results fetched |
 
 ## Tested
@@ -62,7 +63,7 @@ boot-scoped monotonic stamp (`elapsed`), `trim_log`, a job trimmed while it writ
 
 ## Decisions
 
-RDD_001 .. RDD_010 reviewed by the owner on 2026-10-21, RDD_011 .. RDD_013 on 2026-10-22; RDD_014 (2026-10-23, read-only home) and RDD_015 (`report`) await review.
+RDD_001 .. RDD_010 reviewed by the owner on 2026-10-21, RDD_011 .. RDD_013 on 2026-10-22; RDD_014 (2026-10-23, read-only home), RDD_015 (`report`) and RDD_016 (hosts file, ssh / scp / keygen / remote) await review.
 - Confirmed as built: RDD_005 (job environment minus secret names; the guard's name pattern), RDD_003
   (`jm restart` only for a running job, to the top of the queue; retries run `resume`, else `start`), RDD_006
   (`continue_on_fail`: recovery is the group's own business; no "stop running siblings" mode), RDD_007 (`jm list`

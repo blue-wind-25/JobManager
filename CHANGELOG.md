@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.0 - 2026-10-27
+
+- Hosts file `~/.jmhosts` (or `$JM_HOSTS`), INI sections, first = default (RDD_016): `Host`, `User`, `Port`,
+  `SignInKey`, `Jm`, `JmHome`; any other key goes to ssh / scp as `-o Key=Value`.
+- `jm ssh` (alias `ssx`), `jm scp` (`:path` = on the host), `jm remote` (any jm command on the host; a local spec
+  is sent on stdin), `jm keygen` (ed25519 via ssh-keygen, `--install` appends it to the host's authorized_keys,
+  the password asked by ssh on your terminal). All take `--host NAME`. Uses the system OpenSSH client.
+- CI job `jm-ssh`: a localhost round trip; the command-line and keygen tests run on every OS. docs/REMOTE.md sec 4.
+
 ## 1.2.0 - 2026-10-23
 
 - Spec key `report` and `jm report [ID] [-n N]` (RDD_015): a command that prints the job's own status summary (a

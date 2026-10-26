@@ -100,7 +100,53 @@ With Termux, one command per action also works, from the phone's own shell: `ssh
 shortcut in an interactive shell (which reads all of `~/.bashrc`), so `alias pf='ssh -t pi bash -ic jf'` in
 Termux's `~/.bashrc` makes it two letters.
 
-## 4. Limits
+## 4. `jm ssh`, `jm scp`, `jm remote`, `jm keygen` (1.3.0, RDD_016)
+
+Instead of repeating the ssh options in every script, name the workers once in `~/.jmhosts` (or the file
+`$JM_HOSTS` names), one INI section each; the first one is the default:
+
+```
+[cm5]
+User                  = pi
+Host                  = raspberrypi.local
+StrictHostKeyChecking = no
+UserKnownHostsFile    = /dev/null
+LogLevel              = ERROR
+SignInKey             = ~/ssh-pi@raspberrypi-key
+Jm                    = /usr/local/bin/jm          # optional: jm's path on the host (sec 1)
+
+[jetson]
+Host = jetson.local
+```
+
+`Host`, `User`, `Port`, `SignInKey` (the `-i` key), `Jm` and `JmHome` are jm's; **any other key is handed to ssh /
+scp as `-o Key=Value`**, so every ssh option works and ssh reports a misspelt one. `/dev/null` is `NUL` on Windows.
+`chmod 600 ~/.jmhosts`: jm refuses a file others can change.
+
+```sh
+jm ssh uname -a                        # the first host; `jm ssx` is the same command
+jm ssh --host jetson -- ls -la /data   # `--` before a command whose words start with -
+jm ssh -t                              # an interactive login
+jm scp model.bin :/mnt/data/pi/in/     # `:path` = on the host; -r always
+jm scp --host cm5 :/mnt/data/pi/run/extractor.bin .
+jm remote list                         # any jm command, run on the host (-t only at a terminal)
+jm remote --host cm5 log -f j0007
+jm remote submit examples/train.jm     # a local spec: sent on stdin as `submit -`
+```
+
+Exit codes are the client's (255 = ssh itself failed). jm uses the system OpenSSH client (`ssh`, `scp`,
+`ssh-keygen`): Linux, macOS, and Windows 10 1809+ / 11 have it (Windows: Settings > Optional features > OpenSSH
+Client).
+
+**A new sign-in key:** `jm keygen [--host NAME]` runs `ssh-keygen -t ed25519` into the host's `SignInKey` (else
+`~/.ssh/jm_<host>`; an existing file is never overwritten) and prints the `SignInKey = ...` line to add if needed.
+`--no-passphrase` makes an unencrypted key for unattended scripts. Then, **in a terminal**,
+`jm keygen --install [--host NAME] [--file KEY]` appends the public key to the host's `~/.ssh/authorized_keys`
+(POSIX hosts): ssh asks for the host's password itself (jm never sees it), or signs in with the host's other
+`SignInKey` if one works. Where nothing can answer a password prompt (scripts, CI, an AI agent's shell), append
+`KEY.pub` to the host's `authorized_keys` by another route instead.
+
+## 5. Limits
 
 - Windows workers: the same commands work over Windows' OpenSSH server, but its default shell is `cmd`, so the
   quoting rules are cmd's, and the shortcuts (sec 3) are for sh-like shells only.
