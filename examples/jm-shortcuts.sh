@@ -18,7 +18,7 @@
 # Copy next to jm and source it from ~/.bashrc (bash, zsh, dash and busybox sh all work):
 #     . ~/bin/jm-shortcuts.sh
 #
-#   jl          the queue as a tree: id, state, progress (narrow enough for a phone)
+#   jl          the queue as a tree in run order: id, state, progress, aligned (narrow enough for a phone)
 #   js [ID]     status
 #   jf [ID]     follow the captured output (log -f), the children's too; ends when the jobs end, or Ctrl-C
 #   ja [ID]     follow the job's own log (applog -f), the children's too
@@ -37,7 +37,7 @@ _jm_id() {
     return 1
 }
 
-jl() { jm list --tree "$@" | cut -f1,2,5; }
+jl() { jm list --tree --order --fields id,state,progress "$@"; }
 js() { _jm_i=$(_jm_id "$1") && jm status "$_jm_i"; }
 jf() { _jm_i=$(_jm_id "$1") && jm log -f --children "$_jm_i"; }
 ja() { _jm_i=$(_jm_id "$1") && jm applog -f --children "$_jm_i"; }

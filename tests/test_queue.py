@@ -157,6 +157,29 @@ class TestQueueOps(JmTestCase):
         rows = [r.split("\t") for r in self.jm_ok("list").splitlines()]
         self.assertEqual([(r[0], r[2]) for r in rows], [(b, "two"), (a, "uno")])
 
+    def test_list_order_fields_align(self):
+        # Queue order c, a, b, loner but c waits for b and b for a (RDD_017): --order shows the run order.
+        self.submit("id = a\nname = first of the chain\nstart = %s\n" % sim())
+        self.submit("id = b\nafter = a\nstart = %s\n" % sim())
+        self.submit("id = c\nafter = b\nstart = %s\n" % sim(), "--top")
+        self.submit("id = loner_with_a_long_id\nstart = %s\n" % sim())
+        self.assertEqual([r.split("\t")[0] for r in self.jm_ok("list").splitlines()],
+                         ["c", "a", "b", "loner_with_a_long_id"])
+        rows = [r.split("\t") for r in self.jm_ok("list", "--order").splitlines()]
+        self.assertEqual([r[0] for r in rows], ["a", "b", "c", "loner_with_a_long_id"])
+        self.assertEqual(len(rows[0]), 5)
+        # --fields picks and orders the columns; piped output stays tab-separated.
+        self.assertEqual(self.jm_ok("list", "--order", "--fields", "state,id").splitlines()[0], "queued\ta")
+        self.assertEqual(self.jm("list", "--fields", "id,bogus")[0], 2)
+        # --align pads every column but the last to its widest cell.
+        lines = self.jm_ok("list", "--align", "--fields", "id,state,name").splitlines()
+        self.assertEqual(lines[1], "a".ljust(20) + "  queued  first of the chain")
+        self.assertEqual(len(set(x.index("queued") for x in lines)), 1, lines)
+        # A job whose `after` can never be met (b cancelled, after_ok) goes last; finished jobs come first.
+        self.jm_ok("cancel", "b")
+        order = [r.split("\t")[0] for r in self.jm_ok("list", "--order").splitlines()]
+        self.assertEqual(order, ["b", "a", "loner_with_a_long_id", "c"])
+
     def test_config(self):
         self.jm_ok("config", "tokens=gpu:2", "ram_reserve=100", "backfill=no")
         out = self.jm_ok("config")

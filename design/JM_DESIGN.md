@@ -220,6 +220,7 @@ jm daemon bashrc                               print a ~/.bashrc line: start the
 jm submit FILE | - | --name N [--cpu C] [--ram MB] [...] -- COMMAND...
           [--parent ID] [--top | --after ID | --end] [--hold]
 jm list [--all] [--tree] [--tag T]             queue order, state, reason, progress line
+        [--order] [--fields F,F] [--align|--tabs]   run order; columns; padding (RDD_017)
 jm status [ID]                                 one job: spec summary, runs, live RSS/CPU, last log lines
 jm log ID [-f] [-n N] [--children] [--stdout | --stderr]
                                                the job's captured output (follow like tail -f); --children

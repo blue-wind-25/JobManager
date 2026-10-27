@@ -42,7 +42,7 @@ import threading
 import time
 import traceback
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 IS_WIN = os.name == "nt"
 IS_LINUX = sys.platform.startswith("linux")
 JM_PATH = os.path.abspath(__file__)
@@ -2163,13 +2163,60 @@ def job_progress(j):
     return lines[-1].split(" ", 1)[1] if lines and " " in lines[-1] else ""
 
 
+LIST_FIELDS = ("id", "state", "name", "reason", "progress")
+
+
 def list_row(j, depth=0):
     reason = j.reason
     if j.state == RUNNING and j.cmd_active():
         t = elapsed(j.info, "run_start")
         if t is not None:
             reason = "%s, %s" % (reason, fmt_duration(t))
-    return "\t".join(["  " * depth + j.id, j.state, j.name(), reason, job_progress(j)])
+    return ["  " * depth + j.id, j.state, j.name(), reason, job_progress(j)]
+
+
+def run_order(ctx, queued):
+    """The queued jobs in the order they are expected to start (RDD_017): running ones first, then queue order
+    with each job moved after the jobs its `after` names. Resources and estimates are left out: on one machine a
+    chain of `after` jobs is the order that matters. A job whose `after` can never be met goes last."""
+    started = [j for j in queued if j.state in (RUNNING, STOPPING)]
+    rest = [j for j in queued if j.state not in (RUNNING, STOPPING)]
+    in_q = set(j.id for j in queued)
+    placed = set(j.id for j in started)
+
+    def ready(j):
+        for dep in j.spec["after"]:
+            if dep in placed:
+                continue
+            d = ctx.job(dep)
+            if d is None or dep in in_q:
+                return False
+            if j.spec["after_ok"] and d.state != DONE:
+                return False
+        return True
+    order = list(started)
+    while rest:
+        nxt = next((j for j in rest if ready(j)), None)
+        if nxt is None:
+            break
+        order.append(nxt)
+        placed.add(nxt.id)
+        rest.remove(nxt)
+    return order + rest
+
+
+def print_rows(rows, fields, align):
+    idx = [LIST_FIELDS.index(f) for f in fields]
+    rows = [[r[i] for i in idx] for r in rows]
+    if not align:
+        for r in rows:
+            out("\t".join(r))
+        return
+    # Pad every column but the last to its widest cell, capped so one long name or reason cannot push the rest off
+    # a phone's screen (a longer cell is printed whole, unpadded).
+    widths = [min(40, max([len(r[c]) for r in rows] or [0])) for c in range(len(fields) - 1)]
+    for r in rows:
+        out("  ".join([v.ljust(w) for v, w in zip(r, widths)] + r[len(widths):]).rstrip())
 
 
 def cmd_list(store, a):
@@ -2190,15 +2237,24 @@ def cmd_list(store, a):
         if a.all or now - ended <= keep:
             finished.append((ended, j))
     finished.sort(key=lambda x: x[0])
-    rows = queued + [j for _, j in finished]
+    finished = [j for _, j in finished]
+    if a.order:
+        rows = finished + run_order(ctx, queued)
+    else:
+        rows = queued + finished
     if a.tag:
         rows = [j for j in rows if a.tag in j.spec["tags"]]
+    fields = [f.strip() for f in (a.fields or ",".join(LIST_FIELDS)).split(",") if f.strip()]
+    for f in fields:
+        if f not in LIST_FIELDS:
+            raise JmError("list --fields: no field %s (%s)" % (f, ", ".join(LIST_FIELDS)), EXIT_USAGE)
+    lines = []
     if a.tree:
         ids = set(j.id for j in rows)
         order = dict((j.id, i) for i, j in enumerate(rows))
 
         def emit(j, depth):
-            out(list_row(j, depth))
+            lines.append(list_row(j, depth))
             kids = [ctx.job(c) for c in j.children()]
             for k in sorted([k for k in kids if k is not None and k.id in ids], key=lambda k: order[k.id]):
                 emit(k, depth + 1)
@@ -2206,8 +2262,9 @@ def cmd_list(store, a):
             if not (j.parent and j.parent in ids):
                 emit(j, 0)
     else:
-        for j in rows:
-            out(list_row(j))
+        lines = [list_row(j) for j in rows]
+    align = a.align if a.align is not None else sys.stdout.isatty()
+    print_rows(lines, fields, align)
     return EXIT_OK
 
 
@@ -3427,6 +3484,13 @@ def build_parser():
     li.add_argument("--all", action="store_true")
     li.add_argument("--tree", action="store_true")
     li.add_argument("--tag")
+    li.add_argument("--order", action="store_true",
+                    help="finished jobs, then the queue in the order it is expected to run (after chains followed)")
+    li.add_argument("--fields", metavar="F,F", help="columns to print: " + ",".join(LIST_FIELDS) + " (default all)")
+    al_ = li.add_mutually_exclusive_group()
+    al_.add_argument("--align", dest="align", action="store_true", default=None,
+                     help="pad the columns with spaces (the default on a terminal)")
+    al_.add_argument("--tabs", dest="align", action="store_false", help="tab-separated (the default when piped)")
 
     st = sub.add_parser("status", help="one job, or the daemon and the machine")
     st.add_argument("id", nargs="?")

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.4.0 - 2026-10-28
+
+- `jm list --order` (RDD_017): finished jobs, then the queue in the order it is expected to run: running jobs first,
+  then queue order with each job moved after the jobs its `after` names; a job whose `after` can never be met last.
+  Works with `--tree`. Resources and estimates are not modelled.
+- `jm list --fields id,state,name,reason,progress` picks and orders the columns.
+- `jm list` pads its columns with spaces on a terminal (each but the last to its widest cell, at most 40); piped
+  output stays tab-separated as before. `--align` / `--tabs` force either.
+- Shortcut `jl` = `jm list --tree --order --fields id,state,progress`: run order, aligned (was `cut -f1,2,5`, which
+  a terminal's tab stops left ragged).
+
 ## 1.3.0 - 2026-10-27
 
 - Hosts file `~/.jmhosts` (or `$JM_HOSTS`), INI sections, first = default (RDD_016): `Host`, `User`, `Port`,
