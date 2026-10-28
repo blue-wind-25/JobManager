@@ -337,7 +337,7 @@ class TestShortcuts(JmTestCase):
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
                              env=dict(self.env, PATH=bindir + os.pathsep + self.env["PATH"]))
         out, err = p.communicate(timeout=60)
-        self.assertEqual(out.splitlines(), ["%s\theld\t" % a, "rc=1", "id: %s" % a])
+        self.assertEqual(out.splitlines(), ["%s\theld\t-\t" % a, "rc=1", "id: %s" % a])  # id, state, eta, progress
         self.assertIn("no running job", err)
         # jr: a job's report (RDD_015); no ID = every queued job's; a number alone = every job, N lines
         show = "%s %s _sim --secs 0 --print-env JM_LINES" % (q(PY), q(JM))

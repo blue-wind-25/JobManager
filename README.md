@@ -20,7 +20,7 @@ There is no network port and no web UI: remote use is `ssh -t host jm ...`, with
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/blue-wind-25/JobManager/v1.6.0/jm.py -o ~/bin/jm && chmod +x ~/bin/jm
+curl -fsSL https://raw.githubusercontent.com/blue-wind-25/JobManager/v1.6.1/jm.py -o ~/bin/jm && chmod +x ~/bin/jm
 jm daemon start                 # or: jm daemon install systemd | launchd | windows
 ```
 

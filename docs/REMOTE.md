@@ -81,8 +81,8 @@ commands are the local ones; the work is in keeping them short to type. Set up t
 
    | Type | Runs | |
    |---|---|---|
-   | `jl` | `jm list --tree --order --fields id,state,progress` | the queue in run order: id, state, progress (narrow) |
-   | `je` | `jm list --tree --order --fields id,state,eta` | the same with each job's expected end (1.6.0) |
+   | `jl` | `jm list --tree --order --fields id,state,eta,progress` | the queue in run order: id, state, expected end (1.6.1), progress |
+   | `je` | `jm list --tree --order --fields id,state,eta` | the same without progress (narrowest) |
    | `js [ID]` | `jm status ID` | state, runs, live RSS / CPU, last log lines |
    | `jf [ID]` | `jm log -f --children ID` | follow what the job prints; ends when the job ends |
    | `ja [ID]` | `jm applog -f --children ID` | follow the job's own log (`applog`) |

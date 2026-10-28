@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.1 - 2026-10-29
+
+- Shortcut `jl` shows the eta column too: id, state, eta, progress (owner). `je` stays the narrow form (no
+  progress). jm.py itself is unchanged apart from the version.
+
 ## 1.6.0 - 2026-10-29
 
 - Expected end of every queued job (RDD_019, design sec 12.2): `jm list --eta` (or `--fields ...,eta`) adds an
