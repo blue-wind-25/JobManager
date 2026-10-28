@@ -162,6 +162,29 @@ class TestLifeCycle(JmTestCase):
         self.jm_ok("skip", a)
         self.assertEqual(self.wait_ended(b), "done")
 
+    @unittest.skipIf(IS_WIN, "progress command uses tail")
+    def test_history_and_running_eta(self):
+        # RDD_019: a job with a class that ends with exit 0 lands in STATE/history; a running job's eta comes from
+        # its progress samples (token jm:progress=N/T printed by the sim, sampled every progress_every).
+        self.jm_ok("config", "progress_every=0.3s")
+        prog = 'tail -n 1 "$JM_HOME/jobs/$JM_ID/log"'
+        a = self.submit(spec(sim(1.0), **{"class": "sim"}))
+        self.assertEqual(self.wait_ended(a), "done")
+        path = os.path.join(self.home, "history")
+        self.until(lambda: jm.read_text(path).strip(), "the history line (written just after the state)")
+        hist = jm.read_text(path).split()
+        self.assertEqual((hist[0], hist[2]), ("sim", a))
+        b = self.submit(spec(sim(12, progress=True), progress=prog))
+        self.wait_state(b, "running")
+        self.until(lambda: "per step" in self.jm_ok("status", b), "a rate from two progress samples", timeout=20)
+        st = self.jm_ok("status", b)
+        self.assertIn("eta: ~", st)
+        self.assertIn("/120", st)
+        c = self.submit(spec(sim(0.1), after=b, **{"class": "sim"}))
+        row = [r for r in self.jm_ok("list", "--eta", "--tabs").splitlines() if r.startswith(c + "\t")][0]
+        self.assertTrue(row.split("\t")[-1].startswith("~"), row)
+        self.jm_ok("cancel", b)
+
     def test_hold_release(self):
         a = self.submit(spec(sim(0.1)), "--hold")
         time.sleep(0.6)

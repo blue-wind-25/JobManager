@@ -243,6 +243,32 @@ class TestExamples(unittest.TestCase):
             jm.parse_spec(jm.read_text(os.path.join(d, n)), n)
 
 
+class TestProgress(unittest.TestCase):
+    # RDD_019: progress read from the token or from progress_re / progress_total.
+    def spec(self, **keys):
+        text = "start = true\n" + "".join("%s = %s\n" % kv for kv in keys.items())
+        return jm.parse_spec(text)
+
+    def test_progress_value(self):
+        s = self.spec()
+        self.assertEqual(jm.progress_value(s, "x jm:progress=3/40 y"), (3.0, 40.0))
+        self.assertEqual(jm.progress_value(s, "jm:progress=12.5%"), (12.5, 100.0))
+        self.assertIsNone(jm.progress_value(s, "epoch 3: loss 1"))
+        s = self.spec(progress_re=r"epoch (\d+):")
+        self.assertEqual(jm.progress_value(s, "[17] epoch 3: loss 1"), (3.0, None))
+        s = self.spec(progress_re=r"epoch (\d+):", progress_total="40")
+        self.assertEqual(jm.progress_value(s, "epoch 3: loss 1"), (3.0, 40.0))
+        s = self.spec(progress_re=r"RENDER (\d+)/(\d+)")
+        self.assertEqual(jm.progress_value(s, "RENDER 50/200 identities"), (50.0, 200.0))
+
+    def test_progress_re_checked(self):
+        cfg = jm.parse_config("cpus = 2\nram = 1000\n")
+        with self.assertRaises(jm.JmError):
+            jm.check_spec(self.spec(progress_re="epoch \\d+"), cfg)  # no group
+        with self.assertRaises(jm.JmError):
+            jm.check_spec(self.spec(progress_re="epoch (\\d+"), cfg)  # does not compile
+
+
 class TestMisc(unittest.TestCase):
     def test_expand(self):
         env = {"A": "1", "B": "x"}

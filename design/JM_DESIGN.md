@@ -314,6 +314,10 @@ Rule (EASY backfill), replacing step 4 of section 6 when every running job has a
 
 ### 12.2 Progress and ETA (v2)
 
+Built in 1.6.0 (RDD_019) with two changes: `estimate` and the class history are per **job** (all its runs), not
+per run, and the ETA is its own `eta` column (`jm list --eta`) plus an expected end along the `after` chains, so
+the default `jm list` columns stay as they were. The sec 12.1 backfill is still not built.
+
 The spec's `progress` command prints one line; jm reads progress from it with, in order:
 - a token `jm:progress=<done>/<total>` or `jm:progress=<percent>%` anywhere in the line (a job can print it itself);
 - else `progress_re` (a Python regex with one or two groups: done, and total if no `progress_total`) and

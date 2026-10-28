@@ -1,4 +1,9 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(env -u GH_TOKEN -u GITHUB_TOKEN gh release create:*)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {

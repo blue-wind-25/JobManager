@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.6.0 - 2026-10-29
+
+- Expected end of every queued job (RDD_019, design sec 12.2): `jm list --eta` (or `--fields ...,eta`) adds an
+  `eta` column, `jm status ID` an `eta:` line with what it rests on. Shown only; the scheduler does not use it.
+- Spec keys `class` (shared duration history), `progress_re` and `progress_total` (read done / total from the
+  progress line; the token `jm:progress=D/T` or `P%` also works); `estimate` is now used.
+- `STATE/history`: `<class> <seconds> <id>` for each job with a class that ends with exit 0; the class estimate
+  is the median of the last 5 (done jobs that carry the class count too).
+- Shortcut `je`: the queue in run order with the eta column.
+- Default `jm list` columns unchanged. A spec using the new keys needs jm 1.6.0 on that machine.
+
 ## 1.5.0 - 2026-10-29
 
 - `jm hold` takes a stopped job (RDD_018): held, its next run a resume; `jm release` queues it.

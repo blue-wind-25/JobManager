@@ -12,7 +12,8 @@ Last update: 2026-10-23.
 | docs/REMOTE.md (ssh use, phone); `examples/jm-shortcuts.sh` | done; shortcuts tested in sh (CI: also busybox on Alpine), CI matrix green (PR #3) | RDD_012 (no `jm --host` in v1) |
 | jm tests and CI - sec 12.5 | done; full CI matrix green (PR #2) | see below |
 | claude-guards - design/CLAUDE_GUARDS.md sec 2-5, 7 | done (in `guards/`, installed in `.claude/`) | RDD_009 |
-| jm v2 - sec 12.1 estimates / EASY backfill, sec 12.2 progress parsing and ETA | not started | `progress` samples are already stored in the v2 format |
+| jm v2 - sec 12.2 progress parsing and ETA, estimates (`estimate`, `class`, `STATE/history`), `jm list --eta` | done (1.6.0) | RDD_019; `TestProgress`, `test_eta`, `test_history_and_running_eta` |
+| jm v2 - sec 12.1 EASY backfill with estimates | not started | the estimates of RDD_019 are its input |
 | jm v3 - sec 12.3 several users, sec 12.4 several machines (`jm free` already exists) | not started | |
 | claude-guards in its own repository; adoption in HowToTrainYourPetAI (CLAUDE_GUARDS.md sec 6) | not started | `guards/` moves out as is |
 | Release 1.0.0 (`VERSION`, CHANGELOG; tag `v1.0.0` on the release PR's merge) | done | |

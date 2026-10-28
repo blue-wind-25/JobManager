@@ -1,8 +1,8 @@
 # jm operator's reference
 
 Everything needed to decide how to change a live queue - hold, re-point, requeue, skip, re-run - without reading
-`jm.py`. Each rule here is what the code does in 1.5.0; what is new in 1.5.0 (RDD_018) is marked **(1.5)**, so a
-machine still on 1.4.0 lacks it (`jm --version`). [GUIDE.md](GUIDE.md) explains the why and the features,
+`jm.py`. Each rule here is what the code does in 1.6.0; what is new in 1.5.0 (RDD_018) is marked **(1.5)**, in
+1.6.0 (RDD_019) **(1.6)**, so a machine on an older jm lacks it (`jm --version`). [GUIDE.md](GUIDE.md) explains the why and the features,
 [REMOTE.md](REMOTE.md) the `jm remote` / `jm ssh` side. When this file and the code disagree, the code is right
 and this file has a bug.
 
@@ -178,6 +178,7 @@ that had run), `restart` (`jm restart`). `JM_RUN` counts runs from 1.
 | What runs, what waits and why | `jm list` (4th column is the reason); `jm list --order` for start order |
 | One job: runs, exit codes, progress, events | `jm status ID` |
 | What waits for it | `jm deps ID` **(1.5)** |
+| When each job should end | `jm list --order --eta` (shortcut `je`), `jm status ID` line `eta:` **(1.6)** (RDD_019: from `estimate`, the `class` history and the progress rate; resources ignored, shown only) |
 | Its spec as stored | `cat $JM_HOME/jobs/ID/spec` |
 | Its captured output / its own log / its summary | `jm log ID -n 50`, `jm applog ID -n 50`, `jm report ID` |
 | Free cpu, ram, tokens | `jm free` |

@@ -42,7 +42,7 @@ import threading
 import time
 import traceback
 
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 IS_WIN = os.name == "nt"
 IS_LINUX = sys.platform.startswith("linux")
 JM_PATH = os.path.abspath(__file__)
@@ -626,6 +626,7 @@ SPEC_KEYS = [
     ("children", "list", None), ("parallel", "int", 0), ("continue_on_fail", "bool", False),
     ("artifacts", "list", None), ("nice", "int", 5), ("log_max", "num", None), ("keep", "dur", None),
     ("estimate", "dur", None), ("tags", "list", None),
+    ("class", "str", None), ("progress_re", "str", None), ("progress_total", "num", None),  # RDD_019
 ]
 CONFIG_KEYS = [
     ("cpus", "num", None), ("ram", "num", None), ("ram_reserve", "num", 0.0), ("tokens", "tokens", None),
@@ -1271,6 +1272,12 @@ def check_spec(spec, cfg, what="spec"):
         check_env_file(path)
     if not spec["start"] and not spec["children"]:
         raise JmError("%s: needs `start` (or `children` for a group)" % what)
+    if spec["progress_re"]:
+        try:
+            if not re.compile(spec["progress_re"]).groups:
+                raise JmError("%s: progress_re needs a group: (done) or (done)...(total)" % what)
+        except re.error as e:
+            raise JmError("%s: progress_re: %s" % (what, e))
     if spec["id"] is not None and not ID_RE.match(spec["id"]):
         raise JmError("%s: id %r: use letters, digits, `_`, `.`, `-` (max 64)" % (what, spec["id"]))
     for name, n in spec["tokens"]:
@@ -1413,6 +1420,7 @@ def finish_run(ctx, j, rc, note):
             ctx.check_parent(j)
         else:
             ctx.set_state(j, DONE, "exit 0")
+            record_history(ctx.store, j)
     else:
         if note.startswith("pre"):
             why = "pre failed (exit %d)" % rc
@@ -2163,16 +2171,17 @@ def job_progress(j):
     return lines[-1].split(" ", 1)[1] if lines and " " in lines[-1] else ""
 
 
-LIST_FIELDS = ("id", "state", "name", "reason", "progress")
+LIST_FIELDS = ("id", "state", "name", "reason", "progress")  # the default columns, unchanged since 1.0
+ALL_FIELDS = LIST_FIELDS + ("eta",)  # RDD_019: only when asked for (--fields, --eta)
 
 
-def list_row(j, depth=0):
+def list_row(j, depth=0, ends=None):
     reason = j.reason
     if j.state == RUNNING and j.cmd_active():
         t = elapsed(j.info, "run_start")
         if t is not None:
             reason = "%s, %s" % (reason, fmt_duration(t))
-    return ["  " * depth + j.id, j.state, j.name(), reason, job_progress(j)]
+    return ["  " * depth + j.id, j.state, j.name(), reason, job_progress(j), eta_text(j, ends or {})]
 
 
 def run_order(ctx, queued):
@@ -2205,8 +2214,167 @@ def run_order(ctx, queued):
     return order + rest
 
 
+# Estimates and ETA (design sec 12.2, RDD_019): shown only, nothing in the scheduler acts on them. ---------------
+
+PROGRESS_TOKEN_RE = re.compile(r"jm:progress=(\d+(?:\.\d+)?)(?:/(\d+(?:\.\d+)?)|(%))")
+
+
+def progress_value(spec, text):
+    """(done, total) read from one progress line, total None when unknown; None when the line says nothing."""
+    m = PROGRESS_TOKEN_RE.search(text)
+    if m:
+        return (float(m.group(1)), 100.0) if m.group(3) else (float(m.group(1)), float(m.group(2)))
+    if not spec["progress_re"]:
+        return None
+    try:
+        m = re.search(spec["progress_re"], text)
+    except re.error:
+        return None
+    if not m:
+        return None
+    try:
+        done = float(m.group(1))
+        total = float(m.group(2)) if m.re.groups >= 2 and m.group(2) else spec["progress_total"]
+    except (TypeError, ValueError):
+        return None
+    return done, total
+
+
+def progress_rate(j):
+    """(done, total, seconds per unit or None, when `done` was first seen) from the stored progress samples
+    (`jobs/<id>/progress`, `<utc> <line>`, the last 20), or None. The rate spans the first appearance of the
+    oldest and of the newest value, so a value that stays the same between samples does not count as slow."""
+    first_seen = []
+    for line in read_text(j.path("progress")).splitlines():
+        t, _, text = line.partition(" ")
+        t = parse_utc(t)
+        v = progress_value(j.spec, text) if t is not None else None
+        if v is None:
+            continue
+        if not first_seen or first_seen[-1][1] != v[0]:
+            first_seen.append((t, v[0], v[1]))
+    if not first_seen:
+        return None
+    t1, d1, total = first_seen[-1]
+    t0, d0, _ = first_seen[0]
+    rate = (t1 - t0) / (d1 - d0) if d1 > d0 and t1 > t0 else None
+    return d1, total, rate, t1
+
+
+def run_seconds(j):
+    """Seconds the job's ended runs took (`jobs/<id>/runs`: n start end exit how); a run cut off by a reboot
+    counts up to when the daemon noticed."""
+    total = 0.0
+    for r in read_text(j.path("runs")).splitlines():
+        f = r.split()
+        a, b = (parse_utc(f[1]), parse_utc(f[2])) if len(f) >= 3 else (None, None)
+        if a is not None and b is not None:
+            total += max(0.0, b - a)
+    return total
+
+
+def record_history(store, j):
+    """A job with a `class` that ended with exit 0: `<class> <seconds> <id>` into STATE/history (survives clean)."""
+    if j.spec["class"]:
+        try:
+            append_line(store.p("history"), "%s %d %s" % (j.spec["class"], int(run_seconds(j)), j.id))
+        except OSError:
+            pass  # an estimate is a nicety; never fail a job's end over it
+
+
+def class_estimate(ctx, cls):
+    """(median seconds of the last 5 successful jobs of `cls`, how many) or None: STATE/history first, then done
+    jobs still in the state dir that carry the class (set by hand on older jobs) and are not in the history."""
+    secs, seen = [], set()
+    for line in read_text(ctx.store.p("history")).splitlines():
+        f = line.split()
+        if len(f) >= 3 and f[0] == cls:
+            secs.append(float(f[1]))
+            seen.add(f[2])
+    for jid in ctx.store.job_ids():
+        x = ctx.job(jid) if jid not in seen else None
+        if x is not None and x.state == DONE and x.reason == "exit 0" and x.spec["class"] == cls:
+            s = run_seconds(x)
+            if s > 0:
+                secs.append(s)
+    secs = sorted(secs[-5:])
+    if not secs:
+        return None
+    n = len(secs)
+    return (secs[n // 2] if n % 2 else (secs[n // 2 - 1] + secs[n // 2]) / 2.0), n
+
+
+def job_estimate(ctx, j):
+    """(seconds for the whole job, where it came from) or (None, None): the spec's `estimate`, else its class."""
+    if j.spec["estimate"]:
+        return j.spec["estimate"], "estimate"
+    if j.spec["class"]:
+        c = class_estimate(ctx, j.spec["class"])
+        if c:
+            return c[0], "class %s, %d run%s" % (j.spec["class"], c[1], "" if c[1] == 1 else "s")
+    return None, None
+
+
+def remaining_seconds(ctx, j, now):
+    """Expected seconds left for a running job, or None: progress with a total and a rate first, then this
+    run's elapsed time over the fraction done (a first run only), then the estimate minus the time already run."""
+    p = progress_rate(j)
+    run_el = elapsed(j.info, "run_start") or 0.0
+    if p is not None and p[1]:
+        done, total, rate, seen = p
+        if rate is not None:
+            return max(60.0, (total - done) * rate - max(0.0, now - seen))
+        if j.info.get("how") == "start" and 0 < done < total:
+            return max(60.0, run_el * (total - done) / done)
+    est, _ = job_estimate(ctx, j)
+    if est is not None:
+        return max(60.0, est - run_seconds(j) - run_el)
+    return None
+
+
+def forecast(ctx, jobs, now):
+    """{id: expected end (epoch seconds) or None} for the queued `jobs`, in run order. A job starts when every
+    `after` job has ended; resources and backfill are ignored (on one machine the chains decide). held and stopped
+    jobs, and everything after them or after a job without an estimate, are None."""
+    ends = {}
+    for j in run_order(ctx, jobs):
+        if j.state in (RUNNING, STOPPING):
+            r = remaining_seconds(ctx, j, now)
+            ends[j.id] = None if r is None else now + r
+            continue
+        if j.state not in PENDING:
+            ends[j.id] = None
+            continue
+        start = now
+        for dep in j.spec["after"]:
+            d = ctx.job(dep)
+            if d is not None and (d.state == DONE or (d.state in TERMINAL and not j.spec["after_ok"])):
+                continue
+            e = ends.get(dep) if d is not None and d.state not in TERMINAL else None
+            if e is None:
+                start = None
+                break
+            start = max(start, e)
+        est, _ = job_estimate(ctx, j)
+        ends[j.id] = None if start is None or est is None else start + est
+    return ends
+
+
+def fmt_when(t):
+    return "~" + time.strftime("%m-%d %H:%M", time.localtime(t))
+
+
+def eta_text(j, ends):
+    if j.state in TERMINAL:
+        return ""
+    if j.state in (HELD, STOPPED):
+        return "-"
+    e = ends.get(j.id)
+    return "?" if e is None else fmt_when(e)
+
+
 def print_rows(rows, fields, align):
-    idx = [LIST_FIELDS.index(f) for f in fields]
+    idx = [ALL_FIELDS.index(f) for f in fields]
     rows = [[r[i] for i in idx] for r in rows]
     if not align:
         for r in rows:
@@ -2246,15 +2414,18 @@ def cmd_list(store, a):
         rows = [j for j in rows if a.tag in j.spec["tags"]]
     fields = [f.strip() for f in (a.fields or ",".join(LIST_FIELDS)).split(",") if f.strip()]
     for f in fields:
-        if f not in LIST_FIELDS:
-            raise JmError("list --fields: no field %s (%s)" % (f, ", ".join(LIST_FIELDS)), EXIT_USAGE)
+        if f not in ALL_FIELDS:
+            raise JmError("list --fields: no field %s (%s)" % (f, ", ".join(ALL_FIELDS)), EXIT_USAGE)
+    if a.eta and "eta" not in fields:
+        fields.append("eta")
+    ends = forecast(ctx, queued, time.time()) if "eta" in fields else {}
     lines = []
     if a.tree:
         ids = set(j.id for j in rows)
         order = dict((j.id, i) for i, j in enumerate(rows))
 
         def emit(j, depth):
-            lines.append(list_row(j, depth))
+            lines.append(list_row(j, depth, ends))
             kids = [ctx.job(c) for c in j.children()]
             for k in sorted([k for k in kids if k is not None and k.id in ids], key=lambda k: order[k.id]):
                 emit(k, depth + 1)
@@ -2262,7 +2433,7 @@ def cmd_list(store, a):
             if not (j.parent and j.parent in ids):
                 emit(j, 0)
     else:
-        lines = [list_row(j) for j in rows]
+        lines = [list_row(j, 0, ends) for j in rows]
     align = a.align if a.align is not None else sys.stdout.isatty()
     print_rows(lines, fields, align)
     return EXIT_OK
@@ -2384,6 +2555,20 @@ def cmd_status(store, a):
     prog = job_progress(j)
     if prog:
         out("progress: %s" % prog)
+    if j.state not in TERMINAL:
+        # RDD_019: what the estimate rests on, then the expected end along the `after` chains.
+        bits = []
+        p = progress_rate(j)
+        if p is not None:
+            bits.append("%s%s" % (fmt_num(p[0]), "/%s" % fmt_num(p[1]) if p[1] else ""))
+            if p[2] is not None:
+                bits.append("%s per step" % fmt_duration(p[2]))
+        est, src = job_estimate(ctx, j)
+        if est is not None:
+            bits.append("estimate %s (%s)" % (fmt_duration(est), src))
+        queued = [x for x in (ctx.job(i) for i in ctx.queue) if x is not None]
+        ends = forecast(ctx, queued, time.time())
+        out("eta: %s%s" % (eta_text(j, ends), (" (%s)" % ", ".join(bits)) if bits else ""))
     if IS_WIN and s["env_file"]:
         out("warning: env_file permissions are not checked on Windows")
     for name in ("log", "stderr") if s["split_stderr"] else ("log",):
@@ -3598,7 +3783,9 @@ def build_parser():
     li.add_argument("--tag")
     li.add_argument("--order", action="store_true",
                     help="finished jobs, then the queue in the order it is expected to run (after chains followed)")
-    li.add_argument("--fields", metavar="F,F", help="columns to print: " + ",".join(LIST_FIELDS) + " (default all)")
+    li.add_argument("--fields", metavar="F,F",
+                    help="columns to print: " + ",".join(ALL_FIELDS) + " (default: all but eta)")
+    li.add_argument("--eta", action="store_true", help="add the eta column: expected end along the `after` chains")
     al_ = li.add_mutually_exclusive_group()
     al_.add_argument("--align", dest="align", action="store_true", default=None,
                      help="pad the columns with spaces (the default on a terminal)")

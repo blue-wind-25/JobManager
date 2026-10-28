@@ -20,7 +20,7 @@ There is no network port and no web UI: remote use is `ssh -t host jm ...`, with
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/blue-wind-25/JobManager/v1.5.0/jm.py -o ~/bin/jm && chmod +x ~/bin/jm
+curl -fsSL https://raw.githubusercontent.com/blue-wind-25/JobManager/v1.6.0/jm.py -o ~/bin/jm && chmod +x ~/bin/jm
 jm daemon start                 # or: jm daemon install systemd | launchd | windows
 ```
 
@@ -84,7 +84,7 @@ Every key is described in [design/JM_DESIGN.md](design/JM_DESIGN.md) sec 5 (spec
 | `jm daemon install systemd \| launchd \| windows` | write a user service file and print how to enable it |
 | `jm daemon bashrc` | a `~/.bashrc` line that starts the daemon if it is not running |
 | `jm submit FILE \| - \| [opts] -- CMD...` | `--name --cpu --ram --disk --tokens --env --dep --set k=v --parent ID --top --after ID --end --hold --continue-on-fail` |
-| `jm list [--all] [--tree] [--tag T] [--order] [--fields F,F] [--align \| --tabs]` | queue order, then recently finished jobs; `--order`: finished jobs, then the expected run order (`after` chains followed); columns aligned on a terminal, tabs when piped |
+| `jm list [--all] [--tree] [--tag T] [--order] [--fields F,F] [--eta] [--align \| --tabs]` | queue order, then recently finished jobs; `--order`: finished jobs, then the expected run order (`after` chains followed); `--eta`: each job's expected end (from `estimate`, the `class` history, the progress rate); columns aligned on a terminal, tabs when piped |
 | `jm status [ID]` / `jm free` | one job / the daemon and free capacity |
 | `jm log ID [-f] [-n N] [--children] [--stdout\|--stderr] [--raw]` | captured stdout + stderr, secrets masked (`--raw` needs a terminal); `--children` adds the children's, one section each |
 | `jm applog ID [-f] [-n N] [--children] [--raw]` | runs the spec's `applog` command: the log the job keeps itself |

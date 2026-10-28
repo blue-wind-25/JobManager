@@ -20,6 +20,7 @@
 import os
 import subprocess
 import sys
+import time
 import unittest
 
 from jmtest import JmTestCase, jm, sim, q, PY, JM, IS_WIN
@@ -196,6 +197,37 @@ class TestQueueOps(JmTestCase):
         self.assertIn("cycle %s -> %s -> %s" % (a, d, a), err)
         rc, _, err = self.jm("set", b, "name=x")
         self.assertNotIn("after:", err)
+
+    def test_eta(self):
+        # RDD_019: expected ends along the `after` chains from `estimate` and the class history; shown only.
+        hist = os.path.join(self.home, "history")
+        with open(hist, "w") as f:
+            f.write("render 3600 old1\nrender 7200 old2\nrender 5400 old3\n")
+        a = self.submit("estimate = 2h\nstart = %s\n" % sim())
+        b = self.submit("after = %s\nclass = render\nstart = %s\n" % (a, sim()))
+        c = self.submit("after = %s\nstart = %s\n" % (b, sim()))
+        h = self.submit("estimate = 1h\nstart = %s\n" % sim(), "--hold")
+        d = self.submit("after = %s\nestimate = 1h\nstart = %s\n" % (h, sim()))
+        before = time.time()
+        rows = dict((r.split("\t")[0], r.split("\t")) for r in self.jm_ok(
+            "list", "--order", "--fields", "id,state,eta", "--tabs").splitlines())
+        self.assertEqual(len(rows[a]), 3)
+
+        def when(text):
+            self.assertTrue(text.startswith("~"), text)
+            t = time.strptime(time.strftime("%Y-") + text[1:], "%Y-%m-%d %H:%M")
+            return time.mktime(t)
+        # a: now + 2 h; b after it: + the class median (5400 s); c has no estimate; h held; d after a held job.
+        self.assertAlmostEqual(when(rows[a][2]) - before, 7200, delta=120)
+        self.assertAlmostEqual(when(rows[b][2]) - before, 7200 + 5400, delta=120)
+        self.assertEqual([rows[c][2], rows[h][2], rows[d][2]], ["?", "-", "?"])
+        # the default columns stay as they were; --eta adds the column
+        self.assertEqual(len(self.jm_ok("list", "--tabs").splitlines()[0].split("\t")), 5)
+        self.assertEqual(len(self.jm_ok("list", "--tabs", "--eta").splitlines()[0].split("\t")), 6)
+        st = self.jm_ok("status", b)
+        self.assertIn("estimate 1h30m (class render, 3 runs)", st)
+        self.assertIn("eta: ~", st)
+        self.assertIn("eta: ?", self.jm_ok("status", c))
 
     def test_set_keeps_text(self):
         a = self.submit("# my comment\nname = x   # trailing\nstart = %s\nenv = A=1\n" % sim())
