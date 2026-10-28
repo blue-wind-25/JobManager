@@ -1778,7 +1778,10 @@ def daemon_run(store, quiet=False):
     store.need_write()
     store.init()
     dlock = FileLock(store.p("daemon.lock"))
-    if not dlock.acquire(blocking=False):
+    # `jm daemon start` (and every daemon_running() check) takes this lock for a moment to see whether a daemon
+    # holds it; a daemon starting in that moment took the probe for a running daemon and quit (seen on a Windows
+    # CI runner, 1.6.1). A probe lets go at once, a daemon never: wait up to 2 s before giving up.
+    if not dlock.acquire(timeout=2.0):
         raise JmError("a daemon is already running for %s" % store.home)
     stop = []
     if not IS_WIN:

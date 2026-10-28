@@ -3,7 +3,10 @@
 ## 1.6.1 - 2026-10-29
 
 - Shortcut `jl` shows the eta column too: id, state, eta, progress (owner). `je` stays the narrow form (no
-  progress). jm.py itself is unchanged apart from the version.
+  progress).
+- Fix: a daemon starting while `jm daemon start` (or any status check) probed `daemon.lock` took the probe for a
+  running daemon and quit, so the start failed ("the daemon did not start"; daemon.log: "a daemon is already
+  running"). The daemon now waits up to 2 s for the lock. Seen twice on the Windows CI runner.
 
 ## 1.6.0 - 2026-10-29
 
