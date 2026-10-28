@@ -70,6 +70,8 @@ Every key is described in [design/JM_DESIGN.md](design/JM_DESIGN.md) sec 5 (spec
 - [docs/GUIDE.md](docs/GUIDE.md): how jm behaves - job states, `start` / `resume` / `restart`, retries, groups
   and what happens when a child fails, stopping (and Windows), the `on_first_start` / `on_idle` machine hooks
   (read-only data mounts), secrets, logs (`jm log` / `jm applog`), starting the daemon at boot.
+- [docs/OPERATIONS.md](docs/OPERATIONS.md): the operator's reference for changing a live queue - every command in
+  every state, admission, what `after` does (and does not) propagate, one run step by step, recipes.
 - [docs/REMOTE.md](docs/REMOTE.md): driving workers over ssh from a workstation (`ssh -t pi jm ...`, what differs)
   or a phone (two-letter shortcuts, [examples/jm-shortcuts.sh](examples/jm-shortcuts.sh)).
 - [docs/PORTING.md](docs/PORTING.md): moving a project's own queue / resume / waiter scripts to jm.
@@ -121,7 +123,7 @@ secrets at all. See design/JM_DESIGN.md sec 16.
 | `tests/` | `python3 -m unittest discover tests` (unit tests and daemon tests with `jm _sim` fake jobs) |
 | `examples/` | sample specs; `jm-shortcuts.sh` (short commands on a worker, e.g. from a phone); `jm-data-rw.sh` / `jm-data-ro.sh` (machine hooks for a read-only data mount) |
 | `guards/` | claude-guards: Claude Code safety hooks (secret echo, broad search, protected files), installed into `.claude/` |
-| `docs/` | user documentation: `GUIDE.md`, `REMOTE.md`, `PORTING.md` |
+| `docs/` | user documentation: `GUIDE.md`, `OPERATIONS.md`, `REMOTE.md`, `PORTING.md` |
 | `design/` | design notes: `JM_DESIGN.md`, `CLAUDE_GUARDS.md` |
 | `rdd/` | resolved design decisions taken while building |
 | `state/` | implementation state: what is built, tested, next |

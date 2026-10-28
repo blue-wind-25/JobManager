@@ -1,7 +1,8 @@
 # jm user guide
 
 How jm behaves in the cases where "what exactly happens?" matters. The full design is
-[design/JM_DESIGN.md](../design/JM_DESIGN.md); the decisions behind each rule are in [rdd/](../rdd/).
+[design/JM_DESIGN.md](../design/JM_DESIGN.md); the decisions behind each rule are in [rdd/](../rdd/). To change a
+live queue (hold, re-point, requeue, skip), [OPERATIONS.md](OPERATIONS.md) has every command per state in one place.
 
 ## 1. Job states
 
