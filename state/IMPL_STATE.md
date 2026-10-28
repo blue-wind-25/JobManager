@@ -20,7 +20,8 @@ Last update: 2026-10-23.
 | Spec key `report`, `jm report [ID] [-n N]`, shortcut `jr` | done (1.2.0) | RDD_015; `TestReport`, `TestShortcuts` |
 | Hosts file, `jm ssh` / `scp` / `keygen` / `remote` | done (1.3.0) | RDD_016; `tests/test_remote.py`, CI `jm-ssh`; checked by hand against the CM5 |
 | `jm list --order`, `--fields`, aligned columns; `jl` in run order | done (1.4.0) | RDD_017; `test_list_order_fields_align` |
-| docs/OPERATIONS.md: every command per state, admission, `after` rules, run steps, recipes | done (docs only) | rules checked against 1.4.0 code and a scratch daemon (`after` on cancelled / stopped / missing jobs) |
+| `jm hold` of a stopped job, `hold / release --chain`, `jm skip`, `jm deps`, `after` warnings, fuller `jm status` | done (1.5.0) | RDD_018; `test_hold_stopped_and_chain`, `test_skip`, `test_deps_status_and_after_warnings`, `test_skip_and_hold_stopped` |
+| docs/OPERATIONS.md: every command per state, admission, `after` rules, run steps, recipes | done (docs only; 1.5.0 marked) | rules checked against 1.4.0 code and a scratch daemon (`after` on cancelled / stopped / missing jobs) |
 | Dogfooding on the CM5 (JM_DESIGN.md sec 15.2) | in progress, 1.4.0 (HowToTrainYourPetAI RDD_646-653) | 1.0.0 showed RDD_014; passed: submit, run, reboot and a physical power cut mid-run (resumed by itself, systemd user unit + linger, GUIDE sec 9), logs and `report` from the phone, `after` chains of 10+ jobs with hold / stop / `jm set after=` re-pointing (2026-10-28/29); left: results fetched |
 
 ## Release procedure (every release)

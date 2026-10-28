@@ -42,7 +42,7 @@ import threading
 import time
 import traceback
 
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 IS_WIN = os.name == "nt"
 IS_LINUX = sys.platform.startswith("linux")
 JM_PATH = os.path.abspath(__file__)
@@ -2336,10 +2336,14 @@ def cmd_status(store, a):
     out("needs: " + " ".join(need))
     if s["after"]:
         out("after: %s (after_ok = %s)" % (" ".join(s["after"]), "yes" if s["after_ok"] else "no"))
+    needed = dependents(ctx, j.id)
+    if needed:
+        out("needed by: %s" % " ".join("%s:%s" % (d.id, d.state) for d in needed))
     out("cwd: %s" % job_cwd(store, j))
     out("start: %s" % mask_secrets(s["start"] or "-", ctx.cfg))
-    if s["resume"]:
-        out("resume: %s" % mask_secrets(s["resume"], ctx.cfg))
+    for key in ("resume", "done_check", "pre", "post", "stop"):
+        if s[key]:
+            out("%s: %s" % (key, mask_secrets(s[key], ctx.cfg)))
     if s["applog"]:
         out("applog: %s" % mask_secrets(s["applog"], ctx.cfg))
     if s["report"]:
@@ -2752,18 +2756,50 @@ def cmd_swap(store, a):
     return EXIT_OK
 
 
+def dependents(ctx, jid):
+    """The jobs whose `after` names jid, in job id order (RDD_018)."""
+    return [x for x in (ctx.job(i) for i in ctx.store.job_ids()) if x is not None and jid in x.spec["after"]]
+
+
+def chain_of(ctx, jid):
+    """Every job that waits for jid through `after`, directly or not, each once, depth first (RDD_018)."""
+    seen, order = set([jid]), []
+
+    def walk(i):
+        for d in dependents(ctx, i):
+            if d.id not in seen:
+                seen.add(d.id)
+                order.append(d)
+                walk(d.id)
+    walk(jid)
+    return order
+
+
 def cmd_hold(store, a):
     def go(ctx):
         j = ctx.need(a.id)
         if j.state in PENDING:
             ctx.set_state(j, HELD, "held by hand")
+        elif j.state == STOPPED:
+            # RDD_018: parked either way; release then resumes it, as `jm requeue` of the stopped job would.
+            j.info["how"] = "resume"
+            j.info["retries_used"] = "0"
+            j.save_info()
+            ctx.set_state(j, HELD, "held by hand (was stopped)")
         elif j.state == RUNNING:
             j.info["hold_after"] = "yes"
             j.save_info()
             j.event("hold asked while running: held if it goes back to the queue")
             out("%s is running; it will be held if it goes back to the queue (retry)" % j.id)
-        elif j.state != HELD:
+        elif j.state != HELD and not a.chain:
             raise JmError("%s is %s; cannot hold" % (j.id, j.state), EXIT_STATE)
+        if a.chain:
+            # The job itself may be in any state (a running one: park what comes after this run). Only jobs that
+            # could start are parked; running, stopped, held and finished ones are left as they are.
+            for d in chain_of(ctx, j.id):
+                if d.state in PENDING:
+                    ctx.set_state(d, HELD, "held with %s (--chain)" % j.id)
+                    out("held %s" % d.id)
     mutate(store, go)
     return EXIT_OK
 
@@ -2777,10 +2813,81 @@ def cmd_release(store, a):
             j.info.pop("hold_after", None)
             j.save_info()
             j.event("released (hold after run cancelled)")
-        else:
-            raise JmError("%s is %s, not held (stopped jobs: jm requeue)" % (j.id, j.state), EXIT_STATE)
+        elif not a.chain:
+            raise JmError("%s is %s, not held (stopped jobs: jm requeue or jm hold)" % (j.id, j.state), EXIT_STATE)
+        if a.chain:
+            for d in chain_of(ctx, j.id):
+                if d.state == HELD:
+                    ctx.set_state(d, QUEUED, "released with %s (--chain)" % j.id)
+                    out("released %s" % d.id)
     mutate(store, go)
     return EXIT_OK
+
+
+def cmd_skip(store, a):
+    def go(ctx):
+        j = ctx.need(a.id)
+        if j.state in (RUNNING, STOPPING):
+            raise JmError("%s is %s; stop it first (then jm skip)" % (j.id, j.state), EXIT_STATE)
+        if j.state == DONE:
+            raise JmError("%s is already done" % j.id, EXIT_STATE)
+        open_kids = [c for c in ctx.descendants(j.id) if ctx.job(c) and ctx.job(c).state not in TERMINAL]
+        if open_kids:
+            raise JmError("%s has %d unfinished children (%s); skip or cancel them first" % (
+                j.id, len(open_kids), " ".join(open_kids)), EXIT_STATE)
+        # RDD_018: done without a run, so `after_ok = yes` dependents may start; the reason tells it apart.
+        ctx.set_state(j, DONE, "skipped by hand (was %s)" % j.state)
+    mutate(store, go)
+    return EXIT_OK
+
+
+def cmd_deps(store, a):
+    store.init()
+    ctx = Ctx(store)
+    root = ctx.need(a.id)
+    lines, seen = [], set([root.id])
+
+    def walk(jid, depth):
+        for d in dependents(ctx, jid):
+            if d.id in seen:
+                continue
+            seen.add(d.id)
+            lines.append(list_row(d, depth))
+            walk(d.id, depth + 1)
+    walk(root.id, 0)
+    align = a.align if a.align is not None else sys.stdout.isatty()
+    print_rows(lines, ("id", "state", "reason"), align)
+    return EXIT_OK
+
+
+def after_warnings(ctx, jid, spec):
+    """RDD_018: an `after` that names no job, or that leads back to the job itself, waits forever; say so."""
+    msgs = []
+    for dep in spec["after"]:
+        if dep != jid and ctx.job(dep) is None:
+            msgs.append("after: no such job %s (%s waits until one is submitted)" % (dep, jid))
+
+    def path_back(start):
+        # Breadth first, so the warning names the shortest way back.
+        todo, seen = [(start, [start])], set()
+        while todo:
+            cur, path = todo.pop(0)
+            if cur == jid:
+                return path
+            if cur in seen:
+                continue
+            seen.add(cur)
+            x = ctx.job(cur)
+            for nxt in (x.spec["after"] if x is not None else []):
+                todo.append((nxt, path + [nxt]))
+        return None
+    for dep in spec["after"]:
+        p = path_back(dep)
+        if p is not None:
+            msgs.append("after: cycle %s (never starts)" % " -> ".join([jid] + p))
+            break
+    for m in msgs:
+        warn(m)
 
 
 def request_stop(ctx, j, after, reason, extra=None):
@@ -2900,10 +3007,13 @@ def set_spec(ctx, j, items):
     if [k for k, _, _ in assigns if k == "id"]:
         raise JmError("the id cannot be changed", EXIT_STATE)
     text = apply_assignments(j.spec_text, assigns, SPEC_KEYS)
-    check_spec(parse_spec(text, "%s/spec" % j.id), ctx.cfg, j.id)
+    spec = parse_spec(text, "%s/spec" % j.id)
+    check_spec(spec, ctx.cfg, j.id)
     write_atomic(j.path("spec"), text)
     j._spec = None
     j.event("spec changed: " + " ".join(k for k, _, _ in assigns))
+    if [k for k, _, _ in assigns if k == "after"]:
+        after_warnings(ctx, j.id, spec)
 
 
 def cmd_set(store, a):
@@ -2940,7 +3050,9 @@ def cmd_edit(store, a):
                 raise JmError("the id cannot be changed", EXIT_STATE)
             check_spec(spec, ctx.cfg, j.id)
             write_atomic(jj.path("spec"), text)
+            jj._spec = None
             jj.event("spec edited")
+            after_warnings(ctx, j.id, spec)
         mutate(store, go)
     finally:
         remove_file(tmp)
@@ -3534,9 +3646,20 @@ def build_parser():
     sw.add_argument("id1")
     sw.add_argument("id2")
 
-    for name in ("hold", "release", "restart", "pause", "cont"):
+    for name in ("hold", "release"):
         x = sub.add_parser(name)
         x.add_argument("id")
+        x.add_argument("--chain", action="store_true", help="also every job that waits for it through `after`")
+    for name in ("restart", "pause", "cont"):
+        x = sub.add_parser(name)
+        x.add_argument("id")
+    x = sub.add_parser("skip", help="mark a job that is not running done without running it")
+    x.add_argument("id")
+    x = sub.add_parser("deps", help="the jobs that wait for ID through `after`, as a tree")
+    x.add_argument("id")
+    g = x.add_mutually_exclusive_group()
+    g.add_argument("--align", dest="align", action="store_true", default=None)
+    g.add_argument("--tabs", dest="align", action="store_false")
     for name in ("stop", "cancel"):
         x = sub.add_parser(name)
         x.add_argument("id")
@@ -3592,7 +3715,7 @@ COMMANDS = {
     "report": cmd_report,
     "wait": cmd_wait, "move": cmd_move, "swap": cmd_swap, "hold": cmd_hold, "release": cmd_release,
     "stop": cmd_stop, "cancel": cmd_cancel, "restart": cmd_restart, "requeue": cmd_requeue, "set": cmd_set,
-    "edit": cmd_edit, "config": cmd_config, "clean": cmd_clean, "artifacts": cmd_artifacts,
+    "edit": cmd_edit, "skip": cmd_skip, "deps": cmd_deps, "config": cmd_config, "clean": cmd_clean, "artifacts": cmd_artifacts,
     "daemon": cmd_daemon, "pause": lambda s, a: cmd_pause(s, a), "cont": lambda s, a: cmd_pause(s, a, True),
 }
 

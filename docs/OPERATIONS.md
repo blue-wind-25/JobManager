@@ -1,7 +1,8 @@
 # jm operator's reference
 
 Everything needed to decide how to change a live queue - hold, re-point, requeue, skip, re-run - without reading
-`jm.py`. Each rule here is what the code does in 1.4.0; [GUIDE.md](GUIDE.md) explains the why and the features,
+`jm.py`. Each rule here is what the code does in 1.5.0; what is new in 1.5.0 (RDD_018) is marked **(1.5)**, so a
+machine still on 1.4.0 lacks it (`jm --version`). [GUIDE.md](GUIDE.md) explains the why and the features,
 [REMOTE.md](REMOTE.md) the `jm remote` / `jm ssh` side. When this file and the code disagree, the code is right
 and this file has a bug.
 
@@ -13,16 +14,17 @@ and this file has a bug.
 | waiting | yes | yes, once the `reason` clears | the daemon: deps, resources, parent, hook | the daemon |
 | running | yes | - | the daemon | the job's end, or stop / cancel / restart / requeue |
 | stopping | yes | - | stop / cancel / restart / requeue / timeout on a running job | the daemon, once the wrapper ends |
-| held | yes | **no**, never by itself | `jm hold`, `submit --hold`, `on_boot = hold`, a retry after `hold` on a running job | `jm release`, `jm requeue`, stop, cancel |
-| stopped | yes | **no**, never by itself (not after a reboot either) | `jm stop` | `jm requeue`, `jm cancel` |
-| done | no | - | exit 0, or `done_check` passed | `jm requeue` (runs it again) |
+| held | yes | **no**, never by itself | `jm hold`, `submit --hold`, `on_boot = hold`, a retry after `hold` on a running job | `jm release`, `jm requeue`, stop, cancel, skip |
+| stopped | yes | **no**, never by itself (not after a reboot either) | `jm stop` | `jm requeue`, `jm hold` **(1.5)**, `jm cancel`, skip |
+| done | no | - | exit 0, `done_check` passed, `jm skip` **(1.5)** | `jm requeue` (runs it again) |
 | failed | no | - | non-zero exit, `pre` failed, timeout, `on_boot = fail`, with no retries left | `jm requeue` |
 | cancelled | no | - | `jm cancel`, a failed / cancelled parent, a failed sibling | `jm requeue` |
 
 - **Finished** = done, failed, cancelled. Everything else is "in the queue" and shows in `jm list` above the
   finished rows. Finished jobs stay listed for `keep` (default 7 days); `jm clean` deletes their directories.
 - held and stopped are both "parked". The difference: held is meant to go on (`release`), stopped is a run you
-  ended (`requeue`). `jm release` refuses a stopped job; `jm hold` refuses a stopped job too.
+  ended (`requeue`). `jm release` refuses a stopped job. `jm hold` turns a stopped job into a held one whose next
+  run is a resume **(1.5)**; 1.4.0 refuses it.
 - A parked job never blocks other jobs from being admitted: the admission pass skips it (sec 3).
 
 ## 2. What each command does, per state
@@ -31,8 +33,10 @@ and this file has a bug.
 
 | Command | queued / waiting | running | held | stopped | done / failed / cancelled |
 |---|---|---|---|---|---|
-| `hold ID` | -> held | stays running; **held instead of retried** if this run fails | no change | - | - |
+| `hold ID` | -> held | stays running; **held instead of retried** if this run fails | no change | -> held, resumes **(1.5)** | - |
 | `release ID` | - | cancels a pending "hold after this run" (else -) | -> queued | - (use requeue) | - |
+| `hold/release --chain ID` **(1.5)** | as above, then the chain | as above, then the chain | as above, then the chain | as above, then the chain | the chain only |
+| `skip ID` **(1.5)** | -> done | - (stop first) | -> done | -> done | done: -; failed / cancelled -> done |
 | `stop ID` | -> stopped | stop it -> stopped | -> stopped | no change | - |
 | `cancel ID` | -> cancelled | stop it -> cancelled | -> cancelled | -> cancelled | - |
 | `restart ID` | - | stop it -> queued at the **top**, `JM_HOW=restart` | - | - | - |
@@ -54,7 +58,13 @@ Details that matter:
 - **stop / cancel with children** asks first on a terminal; give `--children` in a script (without it and without a
   terminal the command is refused).
 - **restart** is only for a running job. For anything else use requeue.
-- No command marks a job done by hand. See sec 7 "Skip a job".
+- **`--chain`** **(1.5)** = the job, then every job that waits for it through `after`, directly or not. `hold
+  --chain` parks only the chain's queued / waiting jobs (running, stopped, held, finished ones stay as they are);
+  `release --chain` queues every held job in the chain, also ones held by hand. With `--chain` the job itself may
+  be in any state, so `jm hold --chain RUNNING_JOB` lets this run finish and parks what comes after it. It prints
+  `held ID` / `released ID` for each chain job it changed.
+- **`skip`** **(1.5)** marks the job done without a run, reason "skipped by hand (was STATE)"; `after_ok = yes`
+  dependents may then start. Refused for a running job, a done one and a job with unfinished children.
 
 ## 3. Admission: when a queued job starts
 
@@ -86,15 +96,18 @@ or by "never fits" is not a head and does not block anyone.
 | queued, waiting, running, held, stopped | waits: `after: X <state>` | waits |
 | missing (no such id) | waits: `after: X does not exist` | waits |
 
-- **Nothing propagates along `after`.** Holding, stopping, cancelling or failing a job changes nothing in the jobs
-  that name it: they keep waiting, with the reason saying why. So a held job already parks its whole chain;
-  holding the dependents too is only for clarity (and then each one needs its own `release` later).
+- **Nothing propagates along `after` by itself.** Holding, stopping, cancelling or failing a job changes nothing
+  in the jobs that name it: they keep waiting, with the reason saying why. So a held job already parks its whole
+  chain; holding the dependents too is only for clarity. `--chain` **(1.5)** does both in one command, and
+  `release --chain` undoes it in one.
 - A dependency is checked only **when the dependent is about to start**. If X is done, Y started and later X is
   requeued and re-run, Y is not re-run.
 - Several `after` lines: all must be met.
 - `submit` refuses an `after` id that does not exist (unless it is in the same submission). **`jm set` / `jm edit`
-  do not check**: a typo leaves the job waiting with "does not exist". A cycle (A after B, B after A) is not
-  detected either; both wait forever.
+  accept it**: a typo leaves the job waiting with "does not exist", and a cycle (A after B, B after A) waits
+  forever. **(1.5)** they print a warning for both (`after: no such job X`, `after: cycle A -> B -> A`) and still
+  apply the change (exit 0).
+- **(1.5)** `jm deps X` lists what waits for X (a tree, every state); `jm status X` has a `needed by:` line.
 - Parent / child is different: a **failed or cancelled parent cancels** its unfinished children (also held and
   stopped ones), and a child that fails for good cancels its waiting siblings unless the group has
   `continue_on_fail = yes` (GUIDE sec 4).
@@ -130,18 +143,18 @@ that had run), `restart` (`jm restart`). `JM_RUN` counts runs from 1.
 
 | I want to | Do this |
 |---|---|
-| Park a chain | `jm hold FIRST`. The rest waits by itself (sec 4). |
-| Park a running job without losing work | `jm stop ID` (the job must resume from its own checkpoint); later `jm requeue ID` (resume). |
-| Let the current run finish, then park | `jm hold ID` on the running job only catches a failure. For a clean "after this run": hold its dependents instead. |
+| Park a chain | `jm hold FIRST`; the rest waits by itself (sec 4). **(1.5)** `jm hold --chain FIRST` parks every job in it, `jm release --chain FIRST` unparks them. |
+| Park a running job without losing work | `jm stop ID` (the job must resume from its own checkpoint); later `jm requeue ID` (resume), or **(1.5)** `jm hold ID` now and `jm release ID` later. |
+| Let the current run finish, then park | **(1.5)** `jm hold --chain ID`. On 1.4.0: hold its dependents one by one (`jm hold ID` on the running job only catches a failure). |
 | Insert a job into a chain A -> C | submit B with `after = A`, then `jm set C after=B`. |
 | Re-point a dependent | `jm set C after=NEW` (replaces every `after` line; `after+=X` adds one). Not while C runs. |
-| Skip a job in a chain | either `jm set C after=` (or `after=OTHER`) on each dependent, then `jm cancel B`; or make B finish at once: `jm set B done_check=true` (B must not be running), and it is done at its next start. |
+| Skip a job in a chain | **(1.5)** `jm skip B` (stop it first if it runs). On 1.4.0: `jm set C after=OTHER` on each dependent, then `jm cancel B`; or `jm set B done_check=true`, and it is done at its next start. |
 | Run a done job again | `jm requeue ID` (resume) or `--fresh` (start). Its `done_check` still runs first: remove its output, or `jm set ID done_check=` first. Dependents that already ran are not re-run. |
 | Change a waiting job's command or env | `jm set ID start=...` / `env+=K=V` / `env=` (clears the list). Takes effect at its next start. |
 | Change a running job | Not possible (`set` refused). Stop it, `jm requeue ID --spec-edit k=v`, or change the waiting jobs after it. |
 | Make a job start next | `jm move ID --top` (it still waits for its `after` and resources). |
-| Turn stopped into held | No direct command. `jm set ID after+=SOME_HELD_JOB` then `jm requeue ID` (it waits), or requeue and hold quickly. |
-| Find what waits on X | `jm list --order` and read the `after: X` reasons. There is no reverse lookup command. |
+| Turn stopped into held | **(1.5)** `jm hold ID`. On 1.4.0: `jm set ID after+=SOME_HELD_JOB` then `jm requeue ID` (it waits). |
+| Find what waits on X | **(1.5)** `jm deps X`. On 1.4.0: `jm list --order` and read the `after: X` reasons. |
 | Power the machine down | `sudo poweroff`. Running jobs resume at boot (`on_boot = resume`), at the top of the queue. |
 
 ## 8. Spec changes (`set`, `edit`, `requeue --spec-edit`)
@@ -150,10 +163,12 @@ that had run), `restart` (`jm restart`). `JM_RUN` counts runs from 1.
 - `key=value` replaces every line of that key; `key+=value` appends to a list key (`env`, `after`, `tokens`,
   `env_pass`, `env_file`, `children`, `artifacts`, `tags`); `key=` resets it to its default (empty list for
   lists).
-- The changed spec is checked like a submitted one (syntax, secrets, `start` present), except `after` ids (sec 4).
+- The changed spec is checked like a submitted one (syntax, secrets, `start` present), except `after` ids: those
+  only warn **(1.5)** (sec 4).
 - The daemon reads the spec at each admission pass, the wrapper at each run start: a change applies from the next
   pass / run. The stored spec is `$JM_HOME/jobs/ID/spec`. `jm status ID` prints needs, `after`, `cwd`, `start`,
-  `resume`, `applog`, `report` and the env *names*, not `done_check`, `pre`, `post` or env values: read the file.
+  `resume`, `applog`, `report`, the env *names* and **(1.5)** `done_check`, `pre`, `post`, `stop`; never env values
+  (read the file for those).
 - A change is logged in the job's events (`jm status ID`): "spec changed: KEY ...".
 
 ## 9. Reading the state quickly
@@ -162,6 +177,7 @@ that had run), `restart` (`jm restart`). `JM_RUN` counts runs from 1.
 |---|---|
 | What runs, what waits and why | `jm list` (4th column is the reason); `jm list --order` for start order |
 | One job: runs, exit codes, progress, events | `jm status ID` |
+| What waits for it | `jm deps ID` **(1.5)** |
 | Its spec as stored | `cat $JM_HOME/jobs/ID/spec` |
 | Its captured output / its own log / its summary | `jm log ID -n 50`, `jm applog ID -n 50`, `jm report ID` |
 | Free cpu, ram, tokens | `jm free` |

@@ -144,6 +144,24 @@ class TestLifeCycle(JmTestCase):
         self.assertEqual(self.wait_ended(e), "done")
         self.assertGreaterEqual(self.runs(e)[0][1], self.runs(d)[0][2])
 
+    def test_skip_and_hold_stopped(self):
+        # RDD_018: a skipped job counts as done for `after`; a stopped job held and released resumes.
+        a = self.submit(spec(sim(20)))
+        b = self.submit(spec(sim(0.1), after=a))
+        self.wait_state(a, "running")
+        self.jm_ok("stop", a)
+        self.assertEqual(self.wait_ended(a), "stopped")
+        self.jm_ok("hold", a)
+        self.jm_ok("release", a)
+        self.wait_state(a, "running")
+        self.assertEqual(self.runs(a)[-1][-1] if self.runs(a) else "", "start")
+        self.until(lambda: "(resume)" in self.reason(a), "a runs as resume")
+        self.assertEqual(self.jm("skip", a)[0], 4)
+        self.jm_ok("stop", a)
+        self.wait_ended(a)
+        self.jm_ok("skip", a)
+        self.assertEqual(self.wait_ended(b), "done")
+
     def test_hold_release(self):
         a = self.submit(spec(sim(0.1)), "--hold")
         time.sleep(0.6)

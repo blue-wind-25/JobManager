@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.5.0 - 2026-10-29
+
+- `jm hold` takes a stopped job (RDD_018): held, its next run a resume; `jm release` queues it.
+- `jm hold --chain ID` / `jm release --chain ID`: also every job that waits for ID through `after`, directly or not.
+  hold parks the chain's queued / waiting jobs only; release queues every held one. With `--chain` ID itself may be
+  running or finished (park what comes after this run). Each job changed is printed.
+- `jm skip ID`: mark a queued, waiting, held, stopped, failed or cancelled job done without running it (reason
+  "skipped by hand (was STATE)"); not for a running job or one with unfinished children.
+- `jm deps ID`: the jobs waiting for ID through `after`, as a tree (id, state, reason). `jm status` adds
+  `needed by:` and prints `done_check`, `pre`, `post`, `stop`.
+- `jm set` / `jm edit` / `jm requeue --spec-edit` warn about an `after` that names no job or makes a cycle; the
+  change is still applied (exit 0).
+- docs/OPERATIONS.md: the operator's reference (every command per state, admission, `after`, recipes).
+- No state format change; a 1.4.0 daemon reads a 1.5.0 state dir.
+
 ## 1.4.0 - 2026-10-28
 
 - `jm list --order` (RDD_017): finished jobs, then the queue in the order it is expected to run: running jobs first,

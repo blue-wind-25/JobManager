@@ -20,7 +20,7 @@ There is no network port and no web UI: remote use is `ssh -t host jm ...`, with
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/blue-wind-25/JobManager/v1.4.0/jm.py -o ~/bin/jm && chmod +x ~/bin/jm
+curl -fsSL https://raw.githubusercontent.com/blue-wind-25/JobManager/v1.5.0/jm.py -o ~/bin/jm && chmod +x ~/bin/jm
 jm daemon start                 # or: jm daemon install systemd | launchd | windows
 ```
 
@@ -91,7 +91,8 @@ Every key is described in [design/JM_DESIGN.md](design/JM_DESIGN.md) sec 5 (spec
 | `jm report [ID] [-n N] [--raw]` | runs the spec's `report` command: the job's own status summary (no ID: every queued job's, one section each; `-n` = `JM_LINES`) |
 | `jm wait ID [--timeout T]` | block until it ends |
 | `jm move ID --top\|--bottom\|--up N\|--down N\|--before ID2\|--after ID2`, `jm move --by-priority`, `jm swap A B` | reorder |
-| `jm hold ID` / `jm release ID` | park / unpark |
+| `jm hold ID` / `jm release ID` `[--chain]` | park / unpark (also a stopped job); `--chain`: also every job waiting for it through `after` |
+| `jm skip ID` / `jm deps ID` | mark done without running (not a running job) / the jobs waiting for ID, as a tree |
 | `jm stop ID` / `jm restart ID` / `jm requeue ID [--top\|--end] [--fresh] [--spec-edit k=v]` / `jm cancel ID` | life cycle (`--children` for groups) |
 | `jm edit ID` / `jm set ID k=v k+=v k=` | change a spec that is not running |
 | `jm pause ID` / `jm cont ID` | SIGSTOP / SIGCONT (Unix) |
