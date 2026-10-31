@@ -51,9 +51,11 @@ A match is refused ("put it in an env file or a credential helper, not on the co
    `unset NAME`, `env -u NAME ...`, `read [-s] NAME`, `env:NAME`, `-storepass:env NAME`. Anything else is refused.
 2. No whole-environment dump anywhere in a pipeline or substitution: bare `env` / `printenv` / `set`,
    `export -p`, `declare -p`, `ps e`, `jq env`, `history`. (`env` with options but no command is a dump too: this is
-   what refused a command whose text merely ended in "env -u both".)
+   what refused a command whose text merely ended in "env -u both".) The body of a quoted heredoc that only feeds
+   a file writer (`cat > F`, `tee F`, `git commit -F -`) is data, not commands (RDD_020).
 3. No unkeyed environment read from an interpreter or `/proc` (`os.environ`, `ENVIRON`, `getenv()`, `%ENV`,
    `process.env`, `/proc/*/environ`, `${!var}`), unless keyed by a literal name that is not a secret name.
+   `environ` counts as a word, not inside "environment" (RDD_020).
 
 **Messages** name the rule and the safe alternative, generically (the current ones name the two PETAI variables):
 "set it, unset it, or hand the NAME to the tool that reads it (`env:NAME`); to search for the name use the Grep

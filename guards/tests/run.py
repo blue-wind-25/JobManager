@@ -16,7 +16,7 @@
 
 # Regression cases for hooks/guard.py. Each line of cases_<guard>.tsv is "D<TAB>command" (must be denied) or
 # "A<TAB>command" (must pass); "@Tool<TAB>path" in place of the command is a Read / Grep / Glob / Write / Edit
-# call. Three malformed inputs per guard must pass (fail open). Every case is fed to the checker as hook JSON and
+# call; "<NL>" in a command is a newline. Three malformed inputs per guard must pass (fail open). Every case is fed to the checker as hook JSON and
 # never executed - run this from a file, never with the cases on a command line (the live hook would refuse them).
 #   python3 tests/run.py [python]   (default: this interpreter; also run it with python2)
 
@@ -62,6 +62,7 @@ for guard, name in FILES:
         if not line or line.startswith("#"):
             continue
         want, case = line.split("\t", 1)
+        case = case.replace("<NL>", "\n")  # multi-line cases (heredocs)
         n += 1
         got = verdict(guard, json.dumps(payload(case)).encode("utf-8"))
         if got != want:

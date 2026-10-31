@@ -166,8 +166,37 @@ KEYED = re.compile(
     r"|process\.env\s*\[" + LIT + r"\]"
     r"|\bENV\s*\[" + LIT + r"\]"
     r"|\bENV\.fetch\(" + LIT)
-UNKEYED = re.compile(r"environ|ENVIRON|getenv|%ENV\b|\$ENV\b|\bENV\s*[.\[{]|process\.env"
+# environ / ENVIRON as words (os.environ, os.environb, /proc/1/environ), not inside "environment" (RDD_020).
+UNKEYED = re.compile(r"\benvironb?\b|\bENVIRON\b|getenv|%ENV\b|\$ENV\b|\bENV\s*[.\[{]|process\.env"
                      r"|\$\{!" + WORD + r"[*@]?\}|_history\b")
+
+# Rule 2 skips the body of a heredoc that is pure data (RDD_020): its delimiter is quoted, so the shell expands
+# nothing in it (no $(env), no `set`), and it feeds only a file writer - `cat > F`, `cat >> F`, `tee [-a] F`, or
+# `git commit ... -F -` - with nothing after the heredoc on that line (no pipe into a shell or interpreter).
+# Such text is prose or file content: "env" or "set" in it runs nothing. Rules 1 and 3 still scan it; an
+# unquoted delimiter or any other consumer (sh, bash, python3, ssh ...) keeps the whole body under rule 2.
+DATA_HEREDOC = re.compile(
+    r"^[ \t]*(?:[^\n]*?(?:&&|\|\||;)[ \t]*)?(?:"  # an earlier `cd X &&` on the line is still scanned
+    r"cat\s+>>?\s*\S+\s+<<-?\s*(['\"])(\w+)\1"
+    r"|cat\s+<<-?\s*(['\"])(\w+)\3\s+>>?\s*\S+"
+    r"|tee(?:\s+-a)?\s+\S+\s+<<-?\s*(['\"])(\w+)\5(?:\s*>\s*/dev/null)?"
+    r"|git\s+commit\b[^\n|;&<>]*?\s-F\s+-\s*<<-?\s*(['\"])(\w+)\7"
+    r")[ \t]*$", re.M)
+
+
+def without_data_heredocs(cmd):
+    out, pos = [], 0
+    for m in DATA_HEREDOC.finditer(cmd):
+        if m.start() < pos:
+            continue
+        tag = next(g for g in (m.group(2), m.group(4), m.group(6), m.group(8)) if g)
+        end = re.compile(r"^[ \t]*" + re.escape(tag) + r"[ \t]*$", re.M).search(cmd, m.end())
+        if not end:
+            return cmd  # unterminated: judge everything
+        out.append(cmd[pos:m.end()])
+        pos = end.start()
+    out.append(cmd[pos:])
+    return "".join(out)
 
 
 def secret_names_in(cmd, conf):
@@ -257,7 +286,7 @@ def check_secret(data, conf):
     name = names_safe(cmd, conf)
     if name:
         deny(LEAK_MSG % name)
-    for seg in SEGMENT_SPLIT.split(cmd):
+    for seg in SEGMENT_SPLIT.split(without_data_heredocs(cmd)):
         if dumps(seg):
             deny(DUMP_MSG)
     if UNKEYED.search(KEYED.sub("", cmd)):
