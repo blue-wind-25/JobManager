@@ -21,3 +21,18 @@ A	cat my_handoff.txt.bak
 A	@Write	/home/tester/repo/_handoff.txt
 A	@Edit	/home/tester/repo/_handoff.txt
 A	@Read	/home/tester/repo/README.md
+# From HowToTrainYourPetAI's block-handoff-read.sh (RDD_021): copy onto it, edit in place, exclude it from a
+# search; copying it elsewhere or archiving it is reading it.
+A	cp /tmp/scratch _handoff.txt
+A	cp /tmp/scratch _handoff.txt && git diff --stat
+A	mv new.txt ./_handoff.txt
+A	install -m 644 /tmp/s _handoff.txt
+A	sed -i 's/old/new/' _handoff.txt
+A	perl -pi -e 's/a/b/' _handoff.txt
+A	grep -rn foo . --exclude=_handoff.txt
+D	cp _handoff.txt _handoff.txt.bak
+D	rsync _handoff.txt host:/tmp/
+D	tar czf x.tgz _handoff.txt
+D	base64 _handoff.txt
+D	sed -n p _handoff.txt
+D	grep -rn foo _handoff.txt --exclude=x.txt

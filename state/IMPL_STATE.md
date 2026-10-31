@@ -49,8 +49,8 @@ Last update: 2026-10-23.
   every runner: ubuntu-24.04, ubuntu-24.04-arm, macos-latest (arm64), macos-15-intel, windows-latest, and the
   python:3.6-slim, alpine and fedora containers.
 - `guards/tests/run.py`: 167 cases, 0 mismatches on Python 3 and Python 2.7; `guards/tests/install_test.sh` passes
-  (CI job claude-guards). 2026-11-01 (RDD_020): 184 cases, 0 mismatches on Python 3.13; Python 2.7 not re-run yet
-  (no python2 on the owner's PC - next CI run).
+  (CI job claude-guards). 2026-11-01 (RDD_020, RDD_021): 202 cases, 0 mismatches on Python 3.13; Python 2.7 not
+  re-run yet (no python2 on the owner's PC - next CI run).
 - Fixes needed to get there (PR #2): the test harness resolves its temp dir (macOS `/var` -> `/private/var`),
   `test_backfill` holds its blocker job until it cancels it (slow process start on Windows),
   `test_stop_never_resumed` waits for the queue rewrite, container artifacts are made readable by the runner.
@@ -83,7 +83,8 @@ boot-scoped monotonic stamp (`elapsed`), `trim_log`, a job trimmed while it writ
 ## Decisions
 
 RDD_001 .. RDD_010 reviewed by the owner on 2026-10-21, RDD_011 .. RDD_013 on 2026-10-22; RDD_014 (2026-10-23, read-only home), RDD_015 (`report`) and RDD_016 (hosts file, ssh / scp / keygen / remote) and RDD_017 (`list --order`, aligned columns) await review.
-RDD_020 (2026-11-01, guards: data heredocs, `environ` as a word; port of HowToTrainYourPetAI RDD_672) awaits review.
+RDD_020 (2026-11-01, guards: data heredocs, `environ` as a word; port of HowToTrainYourPetAI RDD_672) and RDD_021
+(protected-read write routes, `ls -R`) await review.
 - Confirmed as built: RDD_005 (job environment minus secret names; the guard's name pattern), RDD_003
   (`jm restart` only for a running job, to the top of the queue; retries run `resume`, else `start`), RDD_006
   (`continue_on_fail`: recovery is the group's own business; no "stop running siblings" mode), RDD_007 (`jm list`

@@ -331,6 +331,8 @@ def check_search(data, conf):
             searching = True
         elif name in ("grep", "egrep", "fgrep"):
             searching = any(GREP_RECURSIVE.match(a) for a in args) or "-d recurse" in seg
+        elif name == "ls":  # ls -R walks the tree too (RDD_021)
+            searching = any(re.match(r"^-[A-Za-z]*R[A-Za-z]*$", a) or a == "--recursive" for a in args)
         else:
             searching = False
         if not searching:
@@ -352,6 +354,11 @@ PROTECTED_MSG = ("%s is a protected file: it may be written (>, >>, tee, the Wri
                  "session. If you need its content, ask the owner.")
 WRITE_PRE = re.compile(r"(?:>>?|\btee(?:\s+-a)?)\s*['\"]?(?:\S*/)?$")
 WRITE_CMDS = ("rm", "touch", "chmod", "chown")
+# RDD_021 (from HowToTrainYourPetAI's block-handoff-read.sh): copying ONTO the file (it is the last word) and editing
+# it in place write it; a search may name it in --exclude=. Copying it anywhere else is reading it.
+COPY_CMDS = ("cp", "mv", "install", "rsync", "scp", "dd")
+IN_PLACE = re.compile(r"(?:^|\s)(?:sed|perl)\s+(?:\S+\s+)*?(?:-[A-Za-z]*i[A-Za-z]*|--in-place)(?:[\s=]|$)")
+EXCLUDE_PRE = re.compile(r"--exclude[-a-z]*=['\"]?(?:\S*/)?$")
 
 
 def check_protected(data, conf):
@@ -375,7 +382,7 @@ def check_protected(data, conf):
         rx = re.compile(r"(?:^|(?<=[\s'\"/=<>]))" + re.escape(n) + r"(?=$|[\s'\";&|)])")
         for m in rx.finditer(cmd):
             pre = cmd[:m.start()]
-            if WRITE_PRE.search(pre):
+            if WRITE_PRE.search(pre) or EXCLUDE_PRE.search(pre):
                 continue
             seg = SEGMENT_SPLIT.split(pre)[-1] if pre else ""
             words = strip_wrappers(seg).split()
@@ -383,6 +390,12 @@ def check_protected(data, conf):
                 continue
             if len(words) > 1 and words[0] == "git" and words[1] in ("add", "rm"):
                 continue
+            whole = seg + SEGMENT_SPLIT.split(cmd[m.start():])[0]  # the segment this occurrence sits in
+            if IN_PLACE.search(whole):
+                continue
+            if (words and words[0].rsplit("/", 1)[-1] in COPY_CMDS
+                    and not SEGMENT_SPLIT.split(cmd[m.end():])[0].strip()):
+                continue  # the file is the last word: the destination
             deny(PROTECTED_MSG % n)
 
 

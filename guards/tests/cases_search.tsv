@@ -26,6 +26,11 @@ A	rg foo tests/
 A	grep foo /usr/include/stdio.h
 A	ls /
 A	ls -la /home
+D	ls -R /
+D	ls -laR ~
+D	ls --recursive /usr
+A	ls -R ./src
+A	ls -la /home/tester/proj
 A	du -sh /usr
 A	cd /tmp && find . -name x
 A	cd ~/proj && rg foo
