@@ -42,7 +42,7 @@ import threading
 import time
 import traceback
 
-VERSION = "1.6.1"
+VERSION = "1.7.0"
 IS_WIN = os.name == "nt"
 IS_LINUX = sys.platform.startswith("linux")
 JM_PATH = os.path.abspath(__file__)
@@ -3322,6 +3322,16 @@ def cmd_clean(store, a):
     return EXIT_OK
 
 
+def cmd_spec(store, a):
+    """The spec as stored, with any `jm set` / `jm edit` changes. Masked like the logs (a spec with a secret is refused
+    at submit, but a file edited by hand is not checked)."""
+    store.init()
+    j = Ctx(store).need(a.id)
+    sys.stdout.write(mask_secrets(j.spec_text, store.config()))
+    sys.stdout.flush()
+    return 0
+
+
 def cmd_artifacts(store, a):
     store.init()
     j = Ctx(store).need(a.id)
@@ -3877,6 +3887,8 @@ def build_parser():
     cf.add_argument("assign", nargs="*")
     cl = sub.add_parser("clean", help="drop finished jobs' dirs")
     cl.add_argument("--older", help="default: config keep (7d)")
+    sp = sub.add_parser("spec", help="print the job's spec as stored (with `jm set` / `jm edit` changes)")
+    sp.add_argument("id", help="job id")
     ar = sub.add_parser("artifacts", help="list a job's artifacts")
     ar.add_argument("id")
 
@@ -3909,7 +3921,7 @@ COMMANDS = {
     "report": cmd_report,
     "wait": cmd_wait, "move": cmd_move, "swap": cmd_swap, "hold": cmd_hold, "release": cmd_release,
     "stop": cmd_stop, "cancel": cmd_cancel, "restart": cmd_restart, "requeue": cmd_requeue, "set": cmd_set,
-    "edit": cmd_edit, "skip": cmd_skip, "deps": cmd_deps, "config": cmd_config, "clean": cmd_clean, "artifacts": cmd_artifacts,
+    "edit": cmd_edit, "spec": cmd_spec, "skip": cmd_skip, "deps": cmd_deps, "config": cmd_config, "clean": cmd_clean, "artifacts": cmd_artifacts,
     "daemon": cmd_daemon, "pause": lambda s, a: cmd_pause(s, a), "cont": lambda s, a: cmd_pause(s, a, True),
 }
 

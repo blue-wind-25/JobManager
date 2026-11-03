@@ -168,6 +168,17 @@ class TestQueueOps(JmTestCase):
         self.assertEqual(rc, 4)
         self.assertIn("unfinished children", err)
 
+    def test_spec_prints_the_stored_spec(self):
+        a = self.submit("note = before\nenv = A=1\nstart = %s\n" % sim())
+        got = self.jm_ok("spec", a)
+        self.assertIn("note = before", got)
+        self.assertIn("env = A=1", got)  # the value too: `jm status` shows names only
+        self.jm_ok("set", a, "note=after")
+        self.assertIn("after", self.jm_ok("spec", a))
+        self.assertNotIn("before", self.jm_ok("spec", a))
+        rc, _, _ = self.jm("spec", "nosuchjob")
+        self.assertEqual(rc, 3)
+
     def test_deps_status_and_after_warnings(self):
         a = self.submit("start = %s\ndone_check = test -f nothing\npre = echo pre\n" % sim())
         b = self.submit("after = %s\nstart = %s\n" % (a, sim()))

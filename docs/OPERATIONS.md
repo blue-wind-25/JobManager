@@ -168,7 +168,7 @@ that had run), `restart` (`jm restart`). `JM_RUN` counts runs from 1.
 - The daemon reads the spec at each admission pass, the wrapper at each run start: a change applies from the next
   pass / run. The stored spec is `$JM_HOME/jobs/ID/spec`. `jm status ID` prints needs, `after`, `cwd`, `start`,
   `resume`, `applog`, `report`, the env *names* and **(1.5)** `done_check`, `pre`, `post`, `stop`; never env values
-  (read the file for those).
+  (`jm spec ID` prints the whole spec).
 - A change is logged in the job's events (`jm status ID`): "spec changed: KEY ...".
 
 ## 9. Reading the state quickly
@@ -179,7 +179,7 @@ that had run), `restart` (`jm restart`). `JM_RUN` counts runs from 1.
 | One job: runs, exit codes, progress, events | `jm status ID` |
 | What waits for it | `jm deps ID` **(1.5)** |
 | When each job should end | `jm list --order --eta` (shortcuts `jl`, `je`), `jm status ID` line `eta:` **(1.6)** (RDD_019: from `estimate`, the `class` history and the progress rate; resources ignored, shown only) |
-| Its spec as stored | `cat $JM_HOME/jobs/ID/spec` |
+| Its spec as stored | `jm spec ID` |
 | Its captured output / its own log / its summary | `jm log ID -n 50`, `jm applog ID -n 50`, `jm report ID` |
 | Free cpu, ram, tokens | `jm free` |
 | Block until it ends (exit code = the job's) | `jm wait ID [--timeout 2h]` |

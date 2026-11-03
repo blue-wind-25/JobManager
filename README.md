@@ -20,7 +20,7 @@ There is no network port and no web UI: remote use is `ssh -t host jm ...`, with
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/blue-wind-25/JobManager/v1.6.1/jm.py -o ~/bin/jm && chmod +x ~/bin/jm
+curl -fsSL https://raw.githubusercontent.com/blue-wind-25/JobManager/v1.7.0/jm.py -o ~/bin/jm && chmod +x ~/bin/jm
 jm daemon start                 # or: jm daemon install systemd | launchd | windows
 ```
 
@@ -96,6 +96,7 @@ Every spec and config key is listed in [docs/GUIDE.md](docs/GUIDE.md) sec 11; th
 | `jm hold ID` / `jm release ID` `[--chain]` | park / unpark (also a stopped job); `--chain`: also every job waiting for it through `after` |
 | `jm skip ID` / `jm deps ID [--align \| --tabs]` | mark done without running (not a running job) / the jobs waiting for ID, as a tree |
 | `jm stop ID` / `jm restart ID` / `jm requeue ID [--top\|--end] [--fresh] [--spec-edit k=v]` / `jm cancel ID` | life cycle (`--children` for groups) |
+| `jm spec ID` | print the spec as stored, with any `set` / `edit` changes, env values included (secrets masked) |
 | `jm edit ID` / `jm set ID k=v k+=v k=` | change a spec that is not running |
 | `jm pause ID` / `jm cont ID` | SIGSTOP / SIGCONT (Unix) |
 | `jm config [k=v ...]` / `jm clean [--older 7d]` / `jm artifacts ID` | machine config, drop finished jobs, list outputs |

@@ -1,9 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.7.0 - 2026-11-04
 
 - Docs: every spec and config key (GUIDE sec 11), the missing flags in the README, `--eta` and the missing keys in the
   design, `docs/CHEATSHEET.md` for the shortcuts.
+- `jm spec ID`: print the spec as stored, with `jm set` / `jm edit` changes and env values (secrets masked).
 - `jm --help` describes `hold`, `release`, `restart`, `pause`, `cont`, `stop` and `cancel`; job id arguments say so.
 
 ## 1.6.1 - 2026-10-29

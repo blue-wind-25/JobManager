@@ -248,6 +248,7 @@ jm stop ID                                     stop now -> stopped (stays listed
 jm restart ID                                  stop, then start again in place (JM_HOW=restart; resume cmd)
 jm requeue ID [--top | --end] [--fresh]        stop if running, back to the queue (--fresh: start, not resume)
 jm cancel ID [--children]                      stop if running, remove from the queue
+jm spec ID                                     print the spec as stored, masked like the logs
 jm edit ID                                     open spec in $EDITOR (queued / held / stopped jobs only)
 jm set ID key=value ...                        change spec keys without an editor
 jm pause ID / jm cont ID                       SIGSTOP / SIGCONT (Unix only; optional, risky for timeouts)

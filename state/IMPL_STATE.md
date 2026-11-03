@@ -31,9 +31,9 @@ Last update: 2026-10-23.
 2. Commit, push `main`, run CI (`gh workflow run ci.yml --ref main`), wait until every job is green.
 3. `gh release create vX.Y.Z --target main --title "jm X.Y.Z" --notes-file NOTES` (notes = the CHANGELOG section
    plus the CI run id); check `git rev-parse --short vX.Y.Z^{commit}` = `origin/main`.
-4. **Install on the owner's PC** from the tag, never the working tree:
-   `git show vX.Y.Z:jm.py > ~/bin/jm && chmod 755 ~/bin/jm && jm --version` (`~/bin` is on PATH; no daemon runs on
-   the PC, so no restart).
+4. **The owner's PC needs no install:** `~/bin/jm` is a symlink to this checkout's `jm.py`, so it follows the working
+   tree. Never write to `~/bin/jm` (that would write through the link). The PC daemon runs as a systemd user service
+   with `KillMode=process`; it picks up new code at its next restart or boot, and running jobs survive a restart.
 5. Workers are upgraded by their projects, not from here: HowToTrainYourPetAI `tools/cm5/cm5_jm_update.sh` for the
    CM5 (owner runs it when the queue allows; it keeps the old file as `jm-<old version>`).
 
