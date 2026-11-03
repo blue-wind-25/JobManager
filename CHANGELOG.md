@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Docs: every spec and config key (GUIDE sec 11), the missing flags in the README, `--eta` and the missing keys in the
+  design, `docs/CHEATSHEET.md` for the shortcuts.
+- `jm --help` describes `hold`, `release`, `restart`, `pause`, `cont`, `stop` and `cancel`; job id arguments say so.
+
 ## 1.6.1 - 2026-10-29
 
 - Shortcut `jl` shows the eta column too: id, state, eta, progress (owner). `je` stays the narrow form (no

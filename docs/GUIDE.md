@@ -328,3 +328,78 @@ sudo mount -o remount,ro /
 
 jm drives one machine. To use a worker from your workstation, name it once in `~/.jmhosts` and use `jm remote
 COMMAND`, `jm ssh`, `jm scp` and `jm keygen` (1.3.0, RDD_016), or plain `ssh -t host jm ...`: docs/REMOTE.md.
+
+## 11. Every spec and config key
+
+Unknown keys are an error. A repeated key adds to a list. Durations: `90s`, `30m`, `12h`, `7d`.
+
+**Spec (one job)**
+
+| Key | Default | What it does |
+|---|---|---|
+| `id` | auto (`j0001`) | The job's id |
+| `name` | none | A label in `jm list` |
+| `cwd` | submit dir | Where commands run |
+| `note` | none | Free text, shown by `jm status` |
+| `env` | none | `NAME=value` for this job; never a secret |
+| `env_pass` | none | Name of a daemon variable to pass (sec 7) |
+| `env_file` | none | A `KEY=VALUE` file, mode 0600 (sec 7) |
+| `start` | none | The command to run |
+| `resume` | `start` | The command after a retry, reboot or requeue (sec 2) |
+| `stop` | signals | Command to stop it; gets `JM_PID` (sec 5) |
+| `stop_grace` | 60 | Seconds before KILL |
+| `done_check` | none | Exit 0 before a start: mark done, do not run |
+| `progress` | none | Prints one line, shown in `jm list` and `jm status` |
+| `progress_re` | none | Regex on that line: groups done and total, e.g. `epoch (\d+)/(\d+)` |
+| `progress_total` | none | The total, when the regex has one group |
+| `applog` | none | The job's own log, for `jm applog` (sec 8) |
+| `report` | none | The job's own summary, for `jm report` (sec 8) |
+| `split_stderr` | no | yes: stderr goes to its own file |
+| `pre` | none | Runs before every start; failure fails the start |
+| `post` | none | Runs after every end; gets `JM_EXIT` |
+| `notify` | none | Runs on every state change; gets `JM_STATE` |
+| `cpu` | 1 | Cores it needs (declared, not enforced) |
+| `ram` | 0 | MB it needs (declared, not enforced) |
+| `disk` | none | `MB @ path` free at start |
+| `tokens` | none | Named resources, `name` or `name:count` |
+| `after` | none | Job ids to wait for |
+| `after_ok` | yes | yes: they must succeed; no: any end will do |
+| `priority` | 0 | Higher goes first, only in `jm move --by-priority`; the scheduler ignores it |
+| `retries` | 0 | Automatic restarts after a failure |
+| `timeout` | none | Wall-clock limit per run; counts as a failure |
+| `on_boot` | resume | After a reboot or crash: `resume`, `hold` or `fail` |
+| `drain` | no | yes: once at the head of the queue, admit nothing else |
+| `children` | none | Child spec files: this job is a group (sec 4) |
+| `parallel` | 0 | Group: children at a time |
+| `continue_on_fail` | no | Group: a failing child does not stop the others |
+| `artifacts` | none | Output paths, for `jm artifacts` |
+| `nice` | 5 | Process niceness |
+| `log_max` | config | MB cap for this job's log |
+| `keep` | config | How long the finished job stays listed |
+| `estimate` | none | Expected duration, used for the eta only |
+| `tags` | none | For `jm list --tag` |
+| `class` | none | Jobs of one class share a duration history, used for the eta |
+
+**Config (the machine: `jm config`, file `STATE/config`)**
+
+| Key | Default | What it does |
+|---|---|---|
+| `cpus` | all cores | Cores jm may hand out |
+| `ram` | total RAM | MB jm may hand out |
+| `ram_reserve` | 0 | MB never handed out |
+| `tokens` | none | Named resources and their counts, e.g. `gpu:1` |
+| `backfill` | yes | Later jobs may start while the head does not fit |
+| `drain_after` | 30m | Head job waiting this long: stop backfilling |
+| `poll` | 5s | Scheduler pass interval |
+| `progress_every` | 60s | How often the `progress` command runs |
+| `keep` | 7d | How long finished jobs stay listed; `jm clean --older` default |
+| `env` | none | `NAME=value` for every job |
+| `secret_names` | none | Extra variable names to treat as secret |
+| `not_secret` | none | Names that look secret but are not, e.g. `MAX_TOKENS` |
+| `secret_prefixes` | none | Extra token prefixes to refuse and mask |
+| `on_first_start` | none | Hook: the machine goes from idle to busy (sec 6) |
+| `on_idle` | none | Hook: nothing has run for `idle_after` (sec 6) |
+| `idle_after` | 60s | Quiet time before `on_idle` |
+| `hook_timeout` | 120s | A longer hook is killed |
+| `home_rw` | none | Command that makes a read-only state dir writable (sec 6) |
+| `log_max` | 100 | MB per job log and `daemon.log`; 0 = no limit |

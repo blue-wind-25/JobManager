@@ -130,11 +130,13 @@ Variables available to every command: `JM_ID`, `JM_NAME`, `JM_HOME`, `JM_RUN` (r
 (start | resume | restart), `JM_PARENT` (parent id or empty), `JM_EXIT` (in `post` / `notify`), `JM_STATE`
 (in `notify`, `applog` and `report`), `JM_LINES` / `JM_FOLLOW` (in `applog`: `-n` and `-f` of `jm applog`; in
 `report`: `-n` of `jm report`), plus the spec's `env` lines. `applog` and `report` run in the CLI and get no
-`env_pass` / `env_file` secrets (RDD_011, RDD_015).
+`env_pass` / `env_file` secrets (RDD_011, RDD_015). Also `JM_JM` (the command that runs jm), `JM_PID` (in `stop`) and
+`JM_HOOK` (in machine hooks). `JM_HOME` and `JM_HOSTS` are read by jm itself: its state dir and its hosts file.
 
 **What else is worth carrying** (proposed, all optional): `gpu` as a token (`tokens = gpu`), `nice` (default 5),
 `log_max` (cap the log at N MB: default the config's `log_max`, 100; RDD_013), `keep` (how long a finished job stays in `jm list`, default 7d),
 `estimate` (expected duration; only shown, and usable later by a smarter backfill), `tags` (filter in `list`).
+Eta keys (sec 12.2, RDD_019): `class`, `progress_re`, `progress_total`.
 
 Submitting: `jm submit FILE`, `jm submit -` (spec on stdin, handy over ssh), or inline:
 `jm submit --name x --cpu 1 --ram 200 -- sleep 600`.
@@ -153,7 +155,11 @@ tokens       = bench_jvm:2
 backfill     = yes         # default yes [decided: default on, with the drain guard below]
 drain_after  = 30m         # head job waiting longer than this -> stop backfilling until it starts
 poll         = 5s
+progress_every = 60s       # how often each running job's `progress` command runs (sec 12.2)
 log_max      = 100         # MB per job log and daemon.log; the older part goes to *.1; 0 = no limit (RDD_013)
+idle_after   = 60s         # quiet time before the `on_idle` hook
+hook_timeout = 120s        # a longer machine hook is killed
+not_secret   = MAX_TOKENS  # a name that looks secret but is not (sec 16: secret_names, secret_prefixes)
 ```
 
 Admission, each poll (and on every `wake`):
@@ -214,14 +220,16 @@ case: `jm requeue zh_train --spec-edit size=...`). Stopping or cancelling a pare
 ```
 jm daemon start | stop | status | restart     run in the background (stop leaves running jobs alone)
 jm daemon run                                  run in the foreground (for systemd / launchd / a terminal)
-jm daemon install systemd | launchd | windows  write a user service file and print how to enable it
+jm daemon install systemd | launchd | windows [--out FILE]
+                                               write a user service file and print how to enable it
 jm daemon bashrc                               print a ~/.bashrc line: start the daemon if it is not running
 
 jm submit FILE | - | --name N [--cpu C] [--ram MB] [...] -- COMMAND...
           [--parent ID] [--top | --after ID | --end] [--hold]
 jm list [--all] [--tree] [--tag T]             queue order, state, reason, progress line
         [--order] [--fields F,F] [--align|--tabs]   run order; columns; padding (RDD_017)
-jm status [ID]                                 one job: spec summary, runs, live RSS/CPU, last log lines
+        [--eta]                                expected end along the `after` chains (RDD_019)
+jm status [ID] [-n N]                          one job: spec summary, runs, live RSS/CPU, last N log lines (10)
 jm log ID [-f] [-n N] [--children] [--stdout | --stderr]
                                                the job's captured output (follow like tail -f); --children
                                                adds its children's, one `==> ID <==` section each (RDD_011)
@@ -235,7 +243,7 @@ jm hold ID / jm release ID [--chain]           park / unpark (a running job: hol
                                                held, resumes on release); --chain: also every job waiting for it
                                                through `after` (RDD_018)
 jm skip ID                                     mark a job that is not running done without running it (RDD_018)
-jm deps ID                                     the jobs waiting for ID through `after`, as a tree (RDD_018)
+jm deps ID [--align|--tabs]                    the jobs waiting for ID through `after`, as a tree (RDD_018)
 jm stop ID                                     stop now -> stopped (stays listed, never auto-resumed)
 jm restart ID                                  stop, then start again in place (JM_HOW=restart; resume cmd)
 jm requeue ID [--top | --end] [--fresh]        stop if running, back to the queue (--fresh: start, not resume)

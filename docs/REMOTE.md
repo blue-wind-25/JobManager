@@ -90,6 +90,7 @@ commands are the local ones; the work is in keeping them short to type. Set up t
    | `jr [ID] [N]` | `jm report [ID] [-n N]` | the job's own status summary (`report`); no ID: every queued job's; `jr N`: all, N lines |
 
    Everything else is the plain command (`jm stop j0007`, `jm list` for the full rows with names and reasons).
+   More examples: [CHEATSHEET.md](CHEATSHEET.md).
    Short ids help too: `jm submit --id t5 ...` instead of the automatic `j0007`.
 
 3. In the app, save the worker as a host with key login. In ConnectBot: *Manage Pubkeys* creates a key; append

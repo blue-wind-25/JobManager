@@ -3836,24 +3836,28 @@ def build_parser():
     sw.add_argument("id1")
     sw.add_argument("id2")
 
-    for name in ("hold", "release"):
-        x = sub.add_parser(name)
-        x.add_argument("id")
+    for name, h in (("hold", "park a job: it does not start until released"),
+                    ("release", "unpark a held job")):
+        x = sub.add_parser(name, help=h)
+        x.add_argument("id", help="job id")
         x.add_argument("--chain", action="store_true", help="also every job that waits for it through `after`")
-    for name in ("restart", "pause", "cont"):
-        x = sub.add_parser(name)
-        x.add_argument("id")
+    for name, h in (("restart", "stop a running job and start it again in place"),
+                    ("pause", "SIGSTOP a running job (Unix)"),
+                    ("cont", "SIGCONT a paused job (Unix)")):
+        x = sub.add_parser(name, help=h)
+        x.add_argument("id", help="job id")
     x = sub.add_parser("skip", help="mark a job that is not running done without running it")
-    x.add_argument("id")
+    x.add_argument("id", help="job id")
     x = sub.add_parser("deps", help="the jobs that wait for ID through `after`, as a tree")
-    x.add_argument("id")
+    x.add_argument("id", help="job id")
     g = x.add_mutually_exclusive_group()
     g.add_argument("--align", dest="align", action="store_true", default=None)
     g.add_argument("--tabs", dest="align", action="store_false")
-    for name in ("stop", "cancel"):
-        x = sub.add_parser(name)
-        x.add_argument("id")
-        x.add_argument("--children", action="store_true")
+    for name, h in (("stop", "stop now: stays listed as stopped, never restarts by itself"),
+                    ("cancel", "stop if running and remove from the queue")):
+        x = sub.add_parser(name, help=h)
+        x.add_argument("id", help="job id")
+        x.add_argument("--children", action="store_true", help="also its children")
 
     rq = sub.add_parser("requeue", help="back to the queue (stops it first if running)")
     rq.add_argument("id")

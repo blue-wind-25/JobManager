@@ -63,7 +63,8 @@ retries     = 1
 timeout     = 12h
 ```
 
-Every key is described in [design/JM_DESIGN.md](design/JM_DESIGN.md) sec 5 (spec) and sec 6 (config).
+Every spec and config key is listed in [docs/GUIDE.md](docs/GUIDE.md) sec 11; the design is
+[design/JM_DESIGN.md](design/JM_DESIGN.md) sec 5 (spec) and sec 6 (config).
 
 ## Documentation
 
@@ -75,24 +76,25 @@ Every key is described in [design/JM_DESIGN.md](design/JM_DESIGN.md) sec 5 (spec
 - [docs/REMOTE.md](docs/REMOTE.md): driving workers over ssh from a workstation (`ssh -t pi jm ...`, what differs)
   or a phone (two-letter shortcuts, [examples/jm-shortcuts.sh](examples/jm-shortcuts.sh)).
 - [docs/PORTING.md](docs/PORTING.md): moving a project's own queue / resume / waiter scripts to jm.
+- [docs/CHEATSHEET.md](docs/CHEATSHEET.md): what the shortcuts (`jl`, `jr`, ...) really run, and the common tasks.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `jm daemon start \| stop \| restart \| status \| run` | background / foreground daemon (stop leaves jobs running) |
-| `jm daemon install systemd \| launchd \| windows` | write a user service file and print how to enable it |
+| `jm daemon start \| stop \| restart \| status \| run [-q]` | background / foreground daemon (stop leaves jobs running); `-q`: quiet |
+| `jm daemon install systemd \| launchd \| windows [--out FILE]` | write a user service file (`--out`: to that file) and print how to enable it |
 | `jm daemon bashrc` | a `~/.bashrc` line that starts the daemon if it is not running |
-| `jm submit FILE \| - \| [opts] -- CMD...` | `--name --cpu --ram --disk --tokens --env --dep --set k=v --parent ID --top --after ID --end --hold --continue-on-fail` |
+| `jm submit FILE \| - \| [opts] -- CMD...` | `--id --name --cwd --cpu --ram --disk --tokens --env --timeout --retries --dep --set k=v --parent ID --top --after ID --end --hold --continue-on-fail` |
 | `jm list [--all] [--tree] [--tag T] [--order] [--fields F,F] [--eta] [--align \| --tabs]` | queue order, then recently finished jobs; `--order`: finished jobs, then the expected run order (`after` chains followed); `--eta`: each job's expected end (from `estimate`, the `class` history, the progress rate); columns aligned on a terminal, tabs when piped |
-| `jm status [ID]` / `jm free` | one job / the daemon and free capacity |
+| `jm status [ID] [-n N]` / `jm free` | one job, with its last N log lines (default 10) / the daemon and free capacity |
 | `jm log ID [-f] [-n N] [--children] [--stdout\|--stderr] [--raw]` | captured stdout + stderr, secrets masked (`--raw` needs a terminal); `--children` adds the children's, one section each |
 | `jm applog ID [-f] [-n N] [--children] [--raw]` | runs the spec's `applog` command: the log the job keeps itself |
 | `jm report [ID] [-n N] [--raw]` | runs the spec's `report` command: the job's own status summary (no ID: every queued job's, one section each; `-n` = `JM_LINES`) |
 | `jm wait ID [--timeout T]` | block until it ends |
 | `jm move ID --top\|--bottom\|--up N\|--down N\|--before ID2\|--after ID2`, `jm move --by-priority`, `jm swap A B` | reorder |
 | `jm hold ID` / `jm release ID` `[--chain]` | park / unpark (also a stopped job); `--chain`: also every job waiting for it through `after` |
-| `jm skip ID` / `jm deps ID` | mark done without running (not a running job) / the jobs waiting for ID, as a tree |
+| `jm skip ID` / `jm deps ID [--align \| --tabs]` | mark done without running (not a running job) / the jobs waiting for ID, as a tree |
 | `jm stop ID` / `jm restart ID` / `jm requeue ID [--top\|--end] [--fresh] [--spec-edit k=v]` / `jm cancel ID` | life cycle (`--children` for groups) |
 | `jm edit ID` / `jm set ID k=v k+=v k=` | change a spec that is not running |
 | `jm pause ID` / `jm cont ID` | SIGSTOP / SIGCONT (Unix) |
@@ -106,7 +108,8 @@ Exit codes: 0 ok, 1 error, 2 usage, 3 no such job, 4 not allowed in that state.
 
 Variables every job command sees: `JM_ID`, `JM_NAME`, `JM_HOME`, `JM_RUN`, `JM_HOW` (start / resume / restart),
 `JM_PARENT`, `JM_JM` (the command that runs jm, for `$JM_JM submit --parent "$JM_ID" ...`), plus `JM_EXIT` in
-`post` / `notify`, `JM_STATE` in `notify` / `applog`, and `JM_LINES` / `JM_FOLLOW` in `applog`.
+`post` / `notify`, `JM_STATE` in `notify` / `applog` / `report`, `JM_LINES` / `JM_FOLLOW` in `applog`, `JM_LINES` in
+`report`, `JM_PID` in `stop`, and `JM_HOOK` in machine hooks. `JM_HOME` and `JM_HOSTS` set jm's state dir and hosts file.
 
 ## Secrets
 
@@ -124,7 +127,7 @@ secrets at all. See design/JM_DESIGN.md sec 16.
 | `tests/` | `python3 -m unittest discover tests` (unit tests and daemon tests with `jm _sim` fake jobs) |
 | `examples/` | sample specs; `jm-shortcuts.sh` (short commands on a worker, e.g. from a phone); `jm-data-rw.sh` / `jm-data-ro.sh` (machine hooks for a read-only data mount) |
 | `guards/` | claude-guards: Claude Code safety hooks (secret echo, broad search, protected files), installed into `.claude/` |
-| `docs/` | user documentation: `GUIDE.md`, `OPERATIONS.md`, `REMOTE.md`, `PORTING.md` |
+| `docs/` | user documentation: `GUIDE.md`, `OPERATIONS.md`, `REMOTE.md`, `PORTING.md`, `CHEATSHEET.md` |
 | `design/` | design notes: `JM_DESIGN.md`, `CLAUDE_GUARDS.md` |
 | `rdd/` | resolved design decisions taken while building |
 | `state/` | implementation state: what is built, tested, next |
