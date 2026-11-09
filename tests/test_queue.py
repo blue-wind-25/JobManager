@@ -301,6 +301,16 @@ class TestQueueOps(JmTestCase):
         order = [r.split("\t")[0] for r in self.jm_ok("list", "--order").splitlines()]
         self.assertEqual(order, ["b", "a", "loner_with_a_long_id", "c"])
 
+    def test_list_order_parked_first(self):
+        # RDD_022: stopped, then held, before the waiting jobs; a job waiting on a parked job goes last.
+        for i in ("w1", "h1", "s1", "w2", "dep"):
+            extra = "after = h1\n" if i == "dep" else ""
+            self.submit("id = %s\n%sstart = %s\n" % (i, extra, sim()))
+        self.jm_ok("hold", "h1")
+        self.jm_ok("stop", "s1")
+        order = [r.split("\t")[0] for r in self.jm_ok("list", "--order").splitlines()]
+        self.assertEqual(order, ["s1", "h1", "w1", "w2", "dep"])
+
     def test_config(self):
         self.jm_ok("config", "tokens=gpu:2", "ram_reserve=100", "backfill=no")
         out = self.jm_ok("config")

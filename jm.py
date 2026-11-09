@@ -42,7 +42,7 @@ import threading
 import time
 import traceback
 
-VERSION = "1.7.0"
+VERSION = "1.8.0"
 IS_WIN = os.name == "nt"
 IS_LINUX = sys.platform.startswith("linux")
 JM_PATH = os.path.abspath(__file__)
@@ -2188,11 +2188,14 @@ def list_row(j, depth=0, ends=None):
 
 
 def run_order(ctx, queued):
-    """The queued jobs in the order they are expected to start (RDD_017): running ones first, then queue order
-    with each job moved after the jobs its `after` names. Resources and estimates are left out: on one machine a
-    chain of `after` jobs is the order that matters. A job whose `after` can never be met goes last."""
+    """The queued jobs for `list --order` (RDD_017, RDD_022): parked ones first (stopped, then held: neither starts
+    by itself), then running ones, then queue order with each job moved after the jobs its `after` names. Resources
+    and estimates are left out: on one machine a chain of `after` jobs is the order that matters. A job whose
+    `after` can never be met goes last; so does one waiting on a parked job, which is why parked jobs are not placed."""
     started = [j for j in queued if j.state in (RUNNING, STOPPING)]
-    rest = [j for j in queued if j.state not in (RUNNING, STOPPING)]
+    stopped = [j for j in queued if j.state == STOPPED]
+    held = [j for j in queued if j.state == HELD]
+    rest = [j for j in queued if j.state not in (RUNNING, STOPPING, STOPPED, HELD)]
     in_q = set(j.id for j in queued)
     placed = set(j.id for j in started)
 
@@ -2214,7 +2217,7 @@ def run_order(ctx, queued):
         order.append(nxt)
         placed.add(nxt.id)
         rest.remove(nxt)
-    return order + rest
+    return stopped + held + order + rest
 
 
 # Estimates and ETA (design sec 12.2, RDD_019): shown only, nothing in the scheduler acts on them. ---------------

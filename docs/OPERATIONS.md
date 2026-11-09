@@ -111,8 +111,9 @@ or by "never fits" is not a head and does not block anyone.
 - Parent / child is different: a **failed or cancelled parent cancels** its unfinished children (also held and
   stopped ones), and a child that fails for good cancels its waiting siblings unless the group has
   `continue_on_fail = yes` (GUIDE sec 4).
-- `jm list --order` (and `jl`) prints the queue in expected start order: running first, then each job after the
-  jobs it names; a job whose `after` can never be met goes last.
+- `jm list --order` (and `jl`) prints finished jobs, then the parked ones (stopped, then held), then the queue in
+  expected start order: running first, then each job after the jobs it names; a job whose `after` can never be met,
+  or that waits on a parked job, goes last.
 
 ## 5. One run, step by step
 

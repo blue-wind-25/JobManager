@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.0 - 2026-11-10
+
+- `jm list --order` (and `jl`, `je`): stopped, then held jobs print before the running ones, so the list reads
+  finished, parked, running, waiting (RDD_022, owner). They used to sit between the running and the waiting jobs,
+  as if about to start. A job waiting on a parked job still goes last.
+
 ## 1.7.0 - 2026-11-04
 
 - Docs: every spec and config key (GUIDE sec 11), the missing flags in the README, `--eta` and the missing keys in the
