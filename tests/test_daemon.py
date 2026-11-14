@@ -797,5 +797,78 @@ class TestSecretsRun(JmTestCase):
         self.assertNotIn(tok, self.jm_ok("status", a))
 
 
+class TestMonitor(JmTestCase):
+    """`monitor` (RDD_023): commands beside a job's start / resume, stopped when it ends."""
+    daemon = False
+
+    def mon(self, name, secs=30, exit=0):
+        out = os.path.join(self.work, name)
+        cmd = "%s %s _sim --secs %s --exit %d --print-env JM_ID --print-env JM_MONITOR --out %s" % (
+            q(PY), q(JM), secs, exit, q(out))
+        return cmd, out
+
+    def test_config_and_spec_monitors(self):
+        cfg_cmd, cfg_out = self.mon("cfg.txt")
+        own_cmd, own_out = self.mon("own.txt")
+        self.jm_ok("config", "monitor=" + cfg_cmd)
+        self.start_daemon()
+        a = self.submit(spec(sim(1), monitor=own_cmd))
+        t0 = time.time()
+        self.assertEqual(self.wait_ended(a), "done")
+        self.assertLess(time.time() - t0, 20)  # the 30 s monitors did not hold the job up
+        self.assertIn("env JM_ID=%s" % a, jm.read_text(cfg_out))
+        self.assertIn("env JM_MONITOR=1", jm.read_text(cfg_out))
+        self.assertIn("env JM_MONITOR=2", jm.read_text(own_out))
+        log = self.jobfile(a, "log")
+        self.assertIn("monitor 1 stopped", log)
+        self.assertIn("monitor 2 stopped", log)
+        self.assertEqual(log.count("sim: finished"), 1)  # only the job's own sim ran to its end
+        status = self.jm_ok("status", a)
+        self.assertIn("monitor: " + cfg_cmd, status)
+        self.assertIn("monitor: " + own_cmd, status)
+
+    def test_opt_out_and_not_for_skipped_runs(self):
+        cfg_cmd, cfg_out = self.mon("cfg.txt")
+        self.jm_ok("config", "monitor=" + cfg_cmd)
+        self.start_daemon()
+        a = self.submit(spec(sim(0.5), config_monitor="no"))
+        self.assertEqual(self.wait_ended(a), "done")
+        self.assertNotIn("monitor", self.jobfile(a, "log"))
+        self.assertNotIn("monitor:", self.jm_ok("status", a))
+        dc = "%s %s _sim --secs 0 --exit 0" % (q(PY), q(JM))
+        b = self.submit(spec(sim(5), done_check=dc))
+        self.assertEqual(self.wait_ended(b), "done")
+        c = self.submit(spec(sim(5), pre="%s %s _sim --secs 0 --exit 7" % (q(PY), q(JM))))
+        self.assertEqual(self.wait_ended(c), "failed")
+        self.assertFalse(os.path.exists(cfg_out))  # neither a done_check pass nor a failed pre starts one
+
+    def test_monitor_ending_by_itself(self):
+        cmd, _ = self.mon("m.txt", secs=0.1, exit=3)
+        self.start_daemon()
+        a = self.submit(spec(sim(2), monitor=cmd))
+        self.assertEqual(self.wait_ended(a), "done")  # a monitor's exit does not change the job's
+        self.assertIn("monitor 1 had ended by itself, exit 3", self.jobfile(a, "log"))
+
+    @unittest.skipIf(IS_WIN, "the monitor command uses sh variables")
+    def test_monitor_stops_the_job_and_runs_again_on_requeue(self):
+        mark = os.path.join(self.work, "runs.txt")
+        cmd = "echo run >> %s; sleep 1; %s %s stop $JM_ID; sleep 30" % (q(mark), q(PY), q(JM))
+        self.start_daemon()
+        a = self.submit(spec(sim(30), monitor=cmd))
+        self.assertEqual(self.wait_ended(a), "stopped")
+        self.assertIn("monitor 1 stopped", self.jobfile(a, "log"))
+        self.jm_ok("requeue", a)
+        self.until(lambda: jm.read_text(mark).count("run") == 2, "monitor started again with the new run")
+        self.assertEqual(self.wait_ended(a), "stopped")
+
+    def test_secret_in_monitor_refused(self):
+        self.start_daemon()
+        tok = "github_pat_" + "11ABCDEFG0123456789_abcdefghijklmnop"
+        path = self.write("s.jm", spec(sim(0.1), monitor="curl -H 'x: %s' example.org" % tok))
+        rc, _, err = self.jm("submit", path)
+        self.assertNotEqual(rc, 0)
+        self.assertIn("monitor holds a secret-looking value", err)
+
+
 if __name__ == "__main__":
     unittest.main()

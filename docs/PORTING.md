@@ -25,6 +25,7 @@ can start, stop and start again. This guide is the checklist (the design's versi
 | a chain script: step 1, then step 2, then step 3 | three specs with `after`, or a group with `children` and `parallel = 1` |
 | "fan out one run per language / dataset" | a static group (`children = ...`, `parallel = N`) or a parent that submits children |
 | remounting a read-only data disk around runs (scripts of any name) | `on_first_start` / `on_idle` in jm's config, set to your scripts ([GUIDE.md](GUIDE.md) sec 6) |
+| a watcher started by hand beside each job (`systemd-run ... guard.sh JOB`), stopped by hand when the job is held | `monitor = ...` in the spec, or once in the config for every job ([GUIDE.md](GUIDE.md) sec 6.1) |
 | notification `curl` at the end of a script | `notify = ...` in the spec (runs on every state change, with `JM_STATE`) |
 | tokens exported in the script or in `~/.bashrc` for the job | `env_pass = NAME` / `env_file = /path` (mode 0600) |
 | `ssh host 'tail -f ...'`, status one-liners typed over ssh or from a phone | `ssh -t host jm log -f ID`; on the worker the shortcuts `jl jf ja` ([REMOTE.md](REMOTE.md)) |

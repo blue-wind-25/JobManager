@@ -121,10 +121,12 @@ The wrapper runs, in the job's `cwd`:
 1. `done_check`, if set. **Exit 0 = the job is done; nothing else runs.** It runs before *every* run: first start,
    retry, resume after reboot, requeue, `--fresh` included.
 2. `pre`, if set. Non-zero = the run failed (retries apply).
-3. `resume` when `JM_HOW` is resume / restart and the spec has one; otherwise `start`.
-4. `post`, if set, with `JM_EXIT` (always, whatever the exit code).
+3. **(1.9)** The `monitor` commands start: the config's (unless `config_monitor = no`), then the spec's.
+4. `resume` when `JM_HOW` is resume / restart and the spec has one; otherwise `start`.
+5. **(1.9)** The monitors stop: TERM to each one's group, KILL after 10 s. Their exit status is only logged.
+6. `post`, if set, with `JM_EXIT` (always, whatever the exit code).
 
-The job is **done when step 3 exits 0** - jm cannot tell a finished job from one that exited 0 too early, so a
+The job is **done when step 4 exits 0** - jm cannot tell a finished job from one that exited 0 too early, so a
 script must fail (`set -e`, explicit `exit 1`) when its work is incomplete. A stop request is honoured in any step.
 
 `JM_HOW`: `start` (first run, `requeue --fresh`), `resume` (retry, reboot resume, `requeue`, `release` of a job
@@ -168,7 +170,8 @@ that had run), `restart` (`jm restart`). `JM_RUN` counts runs from 1.
   only warn **(1.5)** (sec 4).
 - The daemon reads the spec at each admission pass, the wrapper at each run start: a change applies from the next
   pass / run. The stored spec is `$JM_HOME/jobs/ID/spec`. `jm status ID` prints needs, `after`, `cwd`, `start`,
-  `resume`, `applog`, `report`, the env *names* and **(1.5)** `done_check`, `pre`, `post`, `stop`; never env values
+  `resume`, `applog`, `report`, the env *names*, **(1.5)** `done_check`, `pre`, `post`, `stop` and **(1.9)**
+  `monitor`; never env values
   (`jm spec ID` prints the whole spec).
 - A change is logged in the job's events (`jm status ID`): "spec changed: KEY ...".
 

@@ -20,7 +20,7 @@ There is no network port and no web UI: remote use is `ssh -t host jm ...`, with
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/blue-wind-25/JobManager/v1.8.0/jm.py -o ~/bin/jm && chmod +x ~/bin/jm
+curl -fsSL https://raw.githubusercontent.com/blue-wind-25/JobManager/v1.9.0/jm.py -o ~/bin/jm && chmod +x ~/bin/jm
 jm daemon start                 # or: jm daemon install systemd | launchd | windows
 ```
 
@@ -68,9 +68,10 @@ Every spec and config key is listed in [docs/GUIDE.md](docs/GUIDE.md) sec 11; th
 
 ## Documentation
 
-- [docs/GUIDE.md](docs/GUIDE.md): how jm behaves - job states, `start` / `resume` / `restart`, retries, groups
-  and what happens when a child fails, stopping (and Windows), the `on_first_start` / `on_idle` machine hooks
-  (read-only data mounts), secrets, logs (`jm log` / `jm applog`), starting the daemon at boot.
+- [docs/GUIDE.md](docs/GUIDE.md): how jm behaves - job states, `start` / `resume` / `restart`, retries, groups and what
+  happens when a child fails, stopping (and Windows), the `on_first_start` / `on_idle` machine hooks (read-only data
+  mounts), `monitor` commands beside each run (a temperature guard), secrets, logs (`jm log` / `jm applog`), starting
+  the daemon at boot.
 - [docs/OPERATIONS.md](docs/OPERATIONS.md): the operator's reference for changing a live queue - every command in
   every state, admission, what `after` does (and does not) propagate, one run step by step, recipes.
 - [docs/REMOTE.md](docs/REMOTE.md): driving workers over ssh from a workstation (`ssh -t pi jm ...`, what differs)
@@ -108,9 +109,10 @@ Every spec and config key is listed in [docs/GUIDE.md](docs/GUIDE.md) sec 11; th
 Exit codes: 0 ok, 1 error, 2 usage, 3 no such job, 4 not allowed in that state.
 
 Variables every job command sees: `JM_ID`, `JM_NAME`, `JM_HOME`, `JM_RUN`, `JM_HOW` (start / resume / restart),
-`JM_PARENT`, `JM_JM` (the command that runs jm, for `$JM_JM submit --parent "$JM_ID" ...`), plus `JM_EXIT` in
-`post` / `notify`, `JM_STATE` in `notify` / `applog` / `report`, `JM_LINES` / `JM_FOLLOW` in `applog`, `JM_LINES` in
-`report`, `JM_PID` in `stop`, and `JM_HOOK` in machine hooks. `JM_HOME` and `JM_HOSTS` set jm's state dir and hosts file.
+`JM_PARENT`, `JM_JM` (the command that runs jm, for `$JM_JM submit --parent "$JM_ID" ...`), plus `JM_EXIT` in `post` /
+`notify`, `JM_STATE` in `notify` / `applog` / `report`, `JM_LINES` / `JM_FOLLOW` in `applog`, `JM_LINES` in `report`,
+`JM_PID` in `stop`, `JM_MONITOR` in a `monitor`, and `JM_HOOK` in machine hooks. `JM_HOME` and `JM_HOSTS` set jm's state
+dir and hosts file.
 
 ## Secrets
 

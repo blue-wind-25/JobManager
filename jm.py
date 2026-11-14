@@ -42,7 +42,7 @@ import threading
 import time
 import traceback
 
-VERSION = "1.8.0"
+VERSION = "1.9.0"
 IS_WIN = os.name == "nt"
 IS_LINUX = sys.platform.startswith("linux")
 JM_PATH = os.path.abspath(__file__)
@@ -620,6 +620,7 @@ SPEC_KEYS = [
     ("start", "cmd", None), ("resume", "cmd", None), ("stop", "cmd", None), ("stop_grace", "dur", 60.0),
     ("done_check", "cmd", None), ("progress", "cmd", None), ("applog", "cmd", None), ("report", "cmd", None), ("split_stderr", "bool", False),
     ("pre", "cmd", None), ("post", "cmd", None), ("notify", "cmd", None),
+    ("monitor", "list", None), ("config_monitor", "bool", True),  # RDD_023
     ("cpu", "num", 1.0), ("ram", "num", 0.0), ("disk", "disk", None), ("tokens", "tokens", None),
     ("after", "list", None), ("after_ok", "bool", True), ("priority", "int", 0), ("retries", "int", 0),
     ("timeout", "dur", None), ("on_boot", "enum:resume|hold|fail", "resume"), ("drain", "bool", False),
@@ -635,6 +636,7 @@ CONFIG_KEYS = [
     ("secret_names", "list", None), ("not_secret", "list", None), ("secret_prefixes", "list", None),
     ("on_first_start", "cmd", None), ("on_idle", "cmd", None), ("hook_timeout", "dur", 120.0),
     ("idle_after", "dur", 60.0), ("log_max", "num", 100.0), ("home_rw", "cmd", None),
+    ("monitor", "list", None),  # RDD_023
 ]
 LIST_KINDS = ("list", "env", "tokens")
 CMD_KEYS_SPEC = [k for k, kind, _ in SPEC_KEYS if kind == "cmd"]
@@ -801,6 +803,7 @@ DEFAULT_CONFIG = """# jm machine config (design/JM_DESIGN.md sec 6). `key = valu
 # hook_timeout   = 120s
 # home_rw        = data-rw.sh    # any command: makes this state dir writable when it is read-only (on_idle)
 # log_max        = 100         # MB per job log and for daemon.log (the older part goes to *.1); 0 = no limit
+# monitor        = sh /abs/temp_guard.sh $JM_ID   # runs beside every job's start / resume, stopped when it ends
 """
 
 
@@ -1263,6 +1266,9 @@ def check_spec(spec, cfg, what="spec"):
     for key in CMD_KEYS_SPEC + ["note", "name"]:
         if spec[key] and has_secret_value(spec[key], cfg):
             raise JmError("%s: %s holds a secret-looking value; reference $NAME and %s" % (what, key, SAFE_WAYS))
+    for cmd in spec["monitor"]:
+        if has_secret_value(cmd, cfg):
+            raise JmError("%s: monitor holds a secret-looking value; reference $NAME and %s" % (what, SAFE_WAYS))
     for name in spec["env_pass"]:
         if not ENV_KEY_RE.match(name):
             raise JmError("%s: env_pass %r is not a variable name" % (what, name))
@@ -1858,6 +1864,54 @@ def popen_shell(cmd, env, cwd, log, nice=0, err=None):
     return subprocess.Popen(cmd, **kw)
 
 
+MONITOR_GRACE = 10.0  # seconds a monitor gets after TERM before KILL
+
+
+def job_monitors(cfg, spec):
+    """The commands that run beside a job's start / resume (RDD_023): the config's, then the spec's own."""
+    return (list(cfg.get("monitor") or []) if spec["config_monitor"] else []) + list(spec["monitor"])
+
+
+def start_monitors(cmds, env, cwd, log, err, say):
+    procs = []
+    for i, cmd in enumerate(cmds, 1):
+        e2 = dict(env)
+        e2["JM_MONITOR"] = str(i)
+        try:
+            p = popen_shell(cmd, e2, cwd, log, err=err)
+            say("monitor %d started %s, pid %d" % (i, utc(), p.pid))
+            procs.append((i, p))
+        except OSError as e:
+            say("monitor %d could not start: %s" % (i, e))
+    return procs
+
+
+def stop_monitors(procs, say):
+    """TERM each monitor's group, KILL it after MONITOR_GRACE. One that already ended says how."""
+    signalled = []
+    for i, p in procs:
+        rc = p.poll()
+        if rc is not None:
+            say("monitor %d had ended by itself, exit %d" % (i, rc))
+            continue
+        if not kill_group(p.pid) and IS_WIN:
+            kill_group(p.pid, hard=True)  # taskkill without /F refused: no gentle way on Windows
+        signalled.append((i, p))
+    hard_at = time.monotonic() + MONITOR_GRACE
+    for i, p in signalled:
+        while p.poll() is None and time.monotonic() < hard_at:
+            time.sleep(0.1)
+        if p.poll() is None:
+            say("monitor %d still running %d s after TERM; killing" % (i, MONITOR_GRACE))
+            kill_group(p.pid, hard=True)
+            p.wait()
+        else:
+            say("monitor %d stopped %s" % (i, utc()))
+    for i, p in procs:
+        if not IS_WIN and group_exists(p.pid):
+            kill_group(p.pid, hard=True)  # whatever a monitor left behind in its group goes too
+
+
 def wrapper_run(store, jid, token):
     """Never leave without an `exit` file: a wrapper that dies silently would read as a cut-off run."""
     try:
@@ -1984,7 +2038,11 @@ def wrapper_body(store, jid, token):
         if rc != 0:
             return finish(rc, "pre")
     cmd = spec["resume"] if how in ("resume", "restart") and spec["resume"] else spec["start"]
-    rc, stopped, sig = watch(cmd, nice)
+    monitors = start_monitors(job_monitors(cfg, spec), env, cwd, log, err, say)
+    try:
+        rc, stopped, sig = watch(cmd, nice)
+    finally:
+        stop_monitors(monitors, say)
     if spec["post"]:
         env["JM_EXIT"] = str(rc)
         try:
@@ -2521,6 +2579,8 @@ def cmd_status(store, a):
     for key in ("resume", "done_check", "pre", "post", "stop"):
         if s[key]:
             out("%s: %s" % (key, mask_secrets(s[key], ctx.cfg)))
+    for cmd in job_monitors(ctx.cfg, s):
+        out("monitor: %s" % mask_secrets(cmd, ctx.cfg))
     if s["applog"]:
         out("applog: %s" % mask_secrets(s["applog"], ctx.cfg))
     if s["report"]:

@@ -122,15 +122,17 @@ drain       = no                         # yes: as soon as this job heads the qu
 pre         = data-rw.sh                 # run before every (re)start; failure = the start fails
 post        = data-ro.sh                 # run after every end (exit code in $JM_EXIT)
 notify      = curl -s -d "$JM_ID $JM_STATE" https://ntfy.sh/mytopic   # on every state change
+monitor     = sh /abs/temp_guard.sh $JM_ID   # beside start / resume, stopped when it ends (RDD_023); a list
+config_monitor = yes                     # no: skip the config's `monitor` lines for this job
 artifacts   = /mnt/data/pi/pettrain_runs/$RUN/extractor.bin            # `jm artifacts <id>` lists them
 note        = restart from epoch 7, RDD_640
 ```
 
-Variables available to every command: `JM_ID`, `JM_NAME`, `JM_HOME`, `JM_RUN` (run number), `JM_HOW`
-(start | resume | restart), `JM_PARENT` (parent id or empty), `JM_EXIT` (in `post` / `notify`), `JM_STATE`
-(in `notify`, `applog` and `report`), `JM_LINES` / `JM_FOLLOW` (in `applog`: `-n` and `-f` of `jm applog`; in
-`report`: `-n` of `jm report`), plus the spec's `env` lines. `applog` and `report` run in the CLI and get no
-`env_pass` / `env_file` secrets (RDD_011, RDD_015). Also `JM_JM` (the command that runs jm), `JM_PID` (in `stop`) and
+Variables available to every command: `JM_ID`, `JM_NAME`, `JM_HOME`, `JM_RUN` (run number), `JM_HOW` (start | resume |
+restart), `JM_PARENT` (parent id or empty), `JM_EXIT` (in `post` / `notify`), `JM_STATE` (in `notify`, `applog` and
+`report`), `JM_LINES` / `JM_FOLLOW` (in `applog`: `-n` and `-f` of `jm applog`; in `report`: `-n` of `jm report`), plus
+the spec's `env` lines. `applog` and `report` run in the CLI and get no `env_pass` / `env_file` secrets (RDD_011,
+RDD_015). Also `JM_JM` (the command that runs jm), `JM_PID` (in `stop`), `JM_MONITOR` (in a `monitor`: its number) and
 `JM_HOOK` (in machine hooks). `JM_HOME` and `JM_HOSTS` are read by jm itself: its state dir and its hosts file.
 
 **What else is worth carrying** (proposed, all optional): `gpu` as a token (`tokens = gpu`), `nice` (default 5),
@@ -160,7 +162,14 @@ log_max      = 100         # MB per job log and daemon.log; the older part goes 
 idle_after   = 60s         # quiet time before the `on_idle` hook
 hook_timeout = 120s        # a longer machine hook is killed
 not_secret   = MAX_TOKENS  # a name that looks secret but is not (sec 16: secret_names, secret_prefixes)
+monitor      = sh /abs/temp_guard.sh $JM_ID   # runs beside every job's start / resume (RDD_023); a list
 ```
+
+**Monitors** (RDD_023): the wrapper starts the config's `monitor` lines (unless the spec says `config_monitor = no`),
+then the spec's, right before `start` / `resume` (after `done_check` and `pre`), and stops them when that command
+ends, before `post`: TERM to each monitor's process group, KILL after 10 s (Windows: the tree, forced). They share
+the job's environment, cwd and log; their exit status is only logged. A monitor acts on the job through jm
+(`$JM_JM stop $JM_ID`). Every run starts its own; held, waiting and stopped jobs have none.
 
 Admission, each poll (and on every `wake`):
 1. Walk the queue top to bottom. Skip held / stopped jobs and jobs whose `after` jobs are not finished.
@@ -531,8 +540,8 @@ coding session whose output is kept. So jm must never hold a secret value, and m
 5. **Masks on display**: `jm log`, `jm applog` and the log tail in `jm status` replace any token-prefix match with
    `<prefix>***`; `--raw` shows the log unmasked (refused when stdout is not a terminal, so an agent's captured
    output stays masked). The log file on disk is left as the job wrote it.
-6. **Hooks and notify** (`pre`, `post`, `notify`, `on_first_start`, `on_idle`) get the same environment as the job,
-   so a webhook secret goes through `env_pass` / `env_file` too, never inline in the command.
+6. **Hooks, monitors and notify** (`pre`, `post`, `monitor`, `notify`, `on_first_start`, `on_idle`) get the same
+   environment as the job, so a webhook secret goes through `env_pass` / `env_file` too, never inline in the command.
    **`applog` is the exception**: it runs on demand and its output is printed, so it gets the job's `env` lines
    but **no** `env_pass` / `env_file` secrets, **and** its output is masked. Both on purpose, because masking
    alone only catches token-shaped values, not a plain password (owner, 2026-10-22; RDD_011). To be relaxed only

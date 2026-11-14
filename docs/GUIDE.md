@@ -188,6 +188,33 @@ no change; removing such calls from job scripts is still cleaner (see [PORTING.m
 to any other pair of "prepare / undo" scripts used as hooks (power a disk up and down, start and stop a service,
 switch a fan profile): the names and what they do are the machine owner's choice.
 
+### 6.1 Monitors: a command beside every run
+
+A machine hook runs once per busy period; a **monitor** runs beside each run of a job and ends with it (RDD_023,
+1.9.0). Typical use: a temperature or disk-space guard that stops the job when something goes wrong.
+
+```
+# STATE/config: every job gets this one
+monitor = sh /opt/guards/temp_guard.sh $JM_ID 55
+# a spec: one more for this job only (repeat the key for several)
+monitor = sh tools/watch_loss.sh run.log
+# a spec: skip the config's monitors (the spec's own still run)
+config_monitor = no
+```
+
+- The wrapper starts them right before `start` / `resume`, after `done_check` and `pre`: a run that `done_check`
+  skips, or whose `pre` fails, starts none. When `start` / `resume` ends (any way: exit, stop, timeout, kill), the
+  monitors get TERM (their whole process group), then KILL after 10 s, and then `post` runs.
+- Every run starts its own monitors: a retry, `jm requeue`, a resume after a reboot. A held, waiting or stopped
+  job has none running, so nothing needs cleaning up by hand. A daemon restart leaves them alone, like the job.
+- They get the job's environment and cwd, plus `JM_MONITOR` (1 for the first). Their output goes into the job's
+  log (`jm log ID`), after a `monitor N started` banner; the end is logged too (`monitor N stopped`, or
+  `monitor N had ended by itself, exit R`).
+- A monitor's exit status never changes the job's. To stop the job, the monitor says so:
+  `$JM_JM stop $JM_ID` (the job ends `stopped`; `jm requeue ID` runs it again, with new monitors).
+- `jm status ID` lists the monitors the job gets. A monitor is refused at submit when it holds a secret-looking
+  value, like every other command.
+
 ## 7. Secrets
 
 - A spec may not hold a secret: an `env` line whose name looks secret (`..._TOKEN`, `..._PASSWORD`,
@@ -225,7 +252,7 @@ jm applog G --children -f         # every applog in the group, until the jobs en
 
 **stdout and stderr.** By default both streams go into one file, `log`, in the order they were written. With
 `split_stderr = yes` in the spec, the stderr of every command jm runs for the job (`done_check`, `pre`, `start` /
-`resume`, `post`, `stop`) goes to `jobs/<id>/stderr` instead; the run banners are in both files. Then
+`resume`, `monitor`, `post`, `stop`) goes to `jobs/<id>/stderr` instead; the run banners are in both files. Then
 `jm log --stdout` shows `log` and `jm log --stderr` shows `stderr` (and `jm status` shows the tail of each). On
 a job without `split_stderr`, `--stdout` warns that the log holds both, and `--stderr` fails (one job) or skips it
 with a warning (`--children`). Splitting loses the order between the two streams, so leave it off unless the
@@ -358,6 +385,8 @@ Unknown keys are an error. A repeated key adds to a list. Durations: `90s`, `30m
 | `pre` | none | Runs before every start; failure fails the start |
 | `post` | none | Runs after every end; gets `JM_EXIT` |
 | `notify` | none | Runs on every state change; gets `JM_STATE` |
+| `monitor` | none | Runs beside `start` / `resume`, stopped when it ends; a list; gets `JM_MONITOR` (sec 6.1) |
+| `config_monitor` | yes | no: skip the config's `monitor` lines for this job (sec 6.1) |
 | `cpu` | 1 | Cores it needs (declared, not enforced) |
 | `ram` | 0 | MB it needs (declared, not enforced) |
 | `disk` | none | `MB @ path` free at start |
@@ -402,4 +431,5 @@ Unknown keys are an error. A repeated key adds to a list. Durations: `90s`, `30m
 | `idle_after` | 60s | Quiet time before `on_idle` |
 | `hook_timeout` | 120s | A longer hook is killed |
 | `home_rw` | none | Command that makes a read-only state dir writable (sec 6) |
+| `monitor` | none | Runs beside every job's `start` / `resume`; a list (sec 6.1) |
 | `log_max` | 100 | MB per job log and `daemon.log`; 0 = no limit |

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.9.0 - 2026-11-15
+
+- `monitor` (RDD_023): commands that run beside a job's `start` / `resume` and stop when it ends: TERM to the
+  monitor's group, KILL after 10 s. Set in the spec (a list, one command per line) or in the machine config, where
+  it applies to every job; `config_monitor = no` in a spec skips the config's. None for a run that `done_check`
+  skips or whose `pre` fails; every retry, requeue and reboot resume starts its own. Output goes to the job's log;
+  `JM_MONITOR` is its number; its exit status never changes the job's. A monitor stops the job with
+  `$JM_JM stop $JM_ID`. `jm status` lists them.
+- A spec or config using `monitor` needs jm 1.9.0 on that machine (older versions refuse the unknown key); after an
+  upgrade, restart the daemon before `jm config monitor=...`.
+
 ## 1.8.0 - 2026-11-10
 
 - `jm list --order` (and `jl`, `je`): stopped, then held jobs print before the running ones, so the list reads

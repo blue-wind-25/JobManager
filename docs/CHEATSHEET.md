@@ -55,6 +55,7 @@ running they print `no running job; give an ID` and fail.
 | Wait for it in a script | `jm wait ID` (exit code = the job's) |
 | Free cores, RAM and tokens | `jm free` |
 | The machine's limits | `jm config` |
+| Guard every job with a script | `jm config monitor+='sh /abs/guard.sh $JM_ID'` (restart the daemon after an upgrade) |
 | A job on another machine | `jm remote list`, `jm remote log -f ID` |
 
 ## Traps
@@ -63,6 +64,7 @@ running they print `no running job; give an ID` and fail.
 - `jm stop` never restarts by itself, not even after a reboot. `jm requeue` it.
 - Nothing passes along `after`. Dependents of a stopped, held or cancelled job just wait. A cancelled one means forever.
 - `jm set` and `jm edit` refuse a running job.
+- A `monitor` must `$JM_JM stop $JM_ID` to stop the job: its own exit status is ignored.
 - A clean poweroff counts as a reboot: running jobs resume at boot, at the top of the queue (`on_boot = resume`).
 
 Every command in every state: [OPERATIONS.md](OPERATIONS.md). Every spec and config key: [GUIDE.md](GUIDE.md) sec 11.
