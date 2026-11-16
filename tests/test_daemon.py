@@ -344,12 +344,13 @@ class TestLifeCycle(JmTestCase):
 
     @unittest.skipIf(IS_WIN, "pause / cont are Unix only")
     def test_pause_not_in_timeout(self):
-        # RDD_025: a pause longer than the timeout does not fail the run (before: "timeout after 2s" mid-pause).
-        a = self.submit(spec(sim(1.0), timeout="2s"))
+        # RDD_025: a pause longer than the timeout does not fail the run (before: "timeout after 4s" mid-pause).
+        # Margins of seconds: off Linux the stamps are whole-second wall-clock text (macos-15-intel failed with 2s).
+        a = self.submit(spec(sim(1.0), timeout="4s"))
         self.wait_state(a, "running")
         time.sleep(0.3)
         self.jm_ok("pause", a)
-        time.sleep(2.5)
+        time.sleep(5.0)
         self.assertEqual(self.state(a), "running")
         self.jm_ok("cont", a)
         self.assertEqual(self.wait_ended(a), "done")
