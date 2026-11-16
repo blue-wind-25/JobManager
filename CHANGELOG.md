@@ -6,6 +6,8 @@
   By default only what is still in the way (jobs not meeting the `after` rule yet, then their own); failed and
   cancelled jobs stay shown ("never met" under `after_ok = yes`), a missing `after` job prints as `missing`. `--all`
   prints the whole chain with every state.
+- A job paused with `jm pause` when a reboot or crash cuts its run off comes back **held**, not resumed (RDD_025):
+  `jm release` resumes it. Paused time no longer counts toward `timeout`.
 
 ## 1.9.0 - 2026-11-15
 

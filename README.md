@@ -100,7 +100,7 @@ Every spec and config key is listed in [docs/GUIDE.md](docs/GUIDE.md) sec 11; th
 | `jm stop ID` / `jm restart ID` / `jm requeue ID [--top\|--end] [--fresh] [--spec-edit k=v]` / `jm cancel ID` | life cycle (`--children` for groups) |
 | `jm spec ID` | print the spec as stored, with any `set` / `edit` changes, env values included (secrets masked) |
 | `jm edit ID` / `jm set ID k=v k+=v k=` | change a spec that is not running |
-| `jm pause ID` / `jm cont ID` | SIGSTOP / SIGCONT (Unix) |
+| `jm pause ID` / `jm cont ID` | SIGSTOP / SIGCONT (Unix); paused time is not part of `timeout`, and a run cut off while paused comes back held (1.10) |
 | `jm config [k=v ...]` / `jm clean [--older 7d]` / `jm artifacts ID` | machine config, drop finished jobs, list outputs |
 | `jm ssh [--host NAME] [-t] [--] [CMD...]` (alias `ssx`) | ssh to a host named in `~/.jmhosts` (first host by default) |
 | `jm scp [--host NAME] SRC... DST` | copy to / from it; `:path` is on the host, `-r` always |

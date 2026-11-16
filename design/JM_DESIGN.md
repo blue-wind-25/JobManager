@@ -262,7 +262,8 @@ jm cancel ID [--children]                      stop if running, remove from the 
 jm spec ID                                     print the spec as stored, masked like the logs
 jm edit ID                                     open spec in $EDITOR (queued / held / stopped jobs only)
 jm set ID key=value ...                        change spec keys without an editor
-jm pause ID / jm cont ID                       SIGSTOP / SIGCONT (Unix only; optional, risky for timeouts)
+jm pause ID / jm cont ID                       SIGSTOP / SIGCONT (Unix only); paused time is left out of `timeout`,
+                                               a run cut off while paused comes back held (RDD_025)
 jm config [key=value ...]                      show / change machine capacity and defaults
 jm clean [--older 7d]                          drop finished jobs' dirs
 

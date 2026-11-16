@@ -43,7 +43,7 @@ and this file has a bug.
 | `requeue ID` | stays, retries reset | stop it -> queued, `JM_HOW=resume` | -> queued | -> queued | -> queued at the end |
 | `set ID k=v`, `edit ID` | changed | - (ended first) | changed | changed | changed (used by a later requeue) |
 | `move`, `swap` | moves it | moves it | moves it | moves it | - (not in the queue) |
-| `pause` / `cont` (Unix) | - | SIGSTOP / SIGCONT its command's process group | - | - | - |
+| `pause` / `cont` (Unix) | - | SIGSTOP / SIGCONT its command's process group; paused time is not part of `timeout` **(1.10)** | - | - | - |
 
 Details that matter:
 - **Stopping a running job** runs the spec's `stop` command (with `JM_PID`), or sends TERM to its process group;
@@ -139,6 +139,7 @@ that had run), `restart` (`jm restart`). `JM_RUN` counts runs from 1.
 - A run fails on: non-zero exit, `pre` failing, `timeout` reached, the wrapper unable to start. With
   `retries = N` it goes back to the queue **at its old place** as a resume run, up to N times; then failed.
 - A retry after `jm hold` on the running job goes to held instead.
+- **(1.10)** A run cut off while paused (`jm pause`) goes to held whatever `on_boot` says; `jm release` resumes it.
 - Reboot / crash / daemon killed: running jobs whose process is gone are *cut off*. `on_boot = resume` (default)
   requeues them at the **top** as resume runs; `hold` parks them; `fail` fails them. A cut-off run does not use up a
   retry. A job that is still alive when the daemon comes back (the daemon alone restarted) is adopted, not re-run.

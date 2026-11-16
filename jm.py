@@ -106,6 +106,22 @@ def stamp_now(info, key):
         info.pop(key + "_mono", None)
 
 
+def paused_secs(info):
+    """RDD_025: seconds this run has spent paused (`jm pause`), the current pause included; not part of `timeout`."""
+    try:
+        total = float(info.get("paused_total", "0"))
+    except ValueError:
+        total = 0.0
+    if "paused" in info:
+        total += elapsed(info, "paused") or 0.0
+    return total
+
+
+def clear_pause(info):
+    for k in ("paused", "paused_mono", "paused_total"):
+        info.pop(k, None)
+
+
 def elapsed(info, key):
     """Seconds since the moment stamp_now() recorded, or None. The monotonic clock when the stamp is from this
     boot: a wall-clock jump (NTP setting the date on a Pi that booted without RTC) must not fire a timeout or
@@ -1413,7 +1429,7 @@ def finish_run(ctx, j, rc, note):
     append_run(j, rc, note)
     for f in ("pid", "child", "stop_req"):
         remove_file(j.path(f))
-    j.info.pop("paused", None)
+    clear_pause(j.info)
     j.save_info()
     if req is not None:
         apply_stop_request(ctx, j, req, rc)
@@ -1451,10 +1467,16 @@ def cut_off(ctx, j):
     append_run(j, "cut", "")
     for f in ("pid", "child", "stop_req"):
         remove_file(j.path(f))
-    j.info.pop("paused", None)
+    was_paused = "paused" in j.info
+    clear_pause(j.info)
     j.save_info()
     if req is not None:
         apply_stop_request(ctx, j, req, None)
+        return
+    if was_paused:  # RDD_025: a pause outlives the reboot that killed the process; `jm release` resumes it
+        j.info["how"] = "resume"
+        j.save_info()
+        ctx.set_state(j, HELD, "run cut off while paused (reboot or crash); held: jm release resumes it")
         return
     mode = j.spec["on_boot"]
     if mode == "hold":
@@ -1553,6 +1575,7 @@ def start_job(ctx, j, use, daemon):
     token = secrets.token_hex(8)
     j.info.update({"run": str(run), "how": how})
     stamp_now(j.info, "run_start")
+    clear_pause(j.info)
     pop_stamp(j.info, "waiting_since")
     j.save_info()
     for f in ("exit", "stop_req", "child"):
@@ -1624,7 +1647,8 @@ def daemon_pass(store, daemon):
             pi = j.pidinfo()
             if pi is not None and proc_alive(*pi):
                 t = j.spec["timeout"]
-                if t and (elapsed(j.info, "run_start") or 0.0) > t and not os.path.exists(j.path("stop_req")):
+                ran = (elapsed(j.info, "run_start") or 0.0) - paused_secs(j.info)  # RDD_025: pauses do not count
+                if t and ran > t and not os.path.exists(j.path("stop_req")):
                     write_kv_file(j.path("stop_req"), {"after": "fail", "reason": "timeout after %s" %
                                                        fmt_duration(t)})
                     ctx.set_state(j, STOPPING, "timeout after %s; stopping" % fmt_duration(t))
@@ -3359,9 +3383,12 @@ def cmd_pause(store, a, cont=False):
             raise JmError("%s is not running a command" % j.id, EXIT_STATE)
         os.killpg(int(child[0]), signal.SIGCONT if cont else signal.SIGSTOP)
         if cont:
+            if "paused" in j.info:  # RDD_025: bank this pause for `timeout`
+                j.info["paused_total"] = "%.3f" % paused_secs(j.info)
             j.info.pop("paused", None)
-        else:
-            j.info["paused"] = utc()
+            j.info.pop("paused_mono", None)
+        elif "paused" not in j.info:
+            stamp_now(j.info, "paused")
         j.save_info()
         j.event("continued" if cont else "paused (SIGSTOP)")
         ctx.set_reason(j, "run %s (%s)%s" % (j.info.get("run"), j.info.get("how"), "" if cont else ", paused"))

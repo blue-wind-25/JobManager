@@ -342,6 +342,18 @@ class TestLifeCycle(JmTestCase):
         self.jm_ok("cont", a)
         self.assertEqual(self.wait_ended(a), "done")
 
+    @unittest.skipIf(IS_WIN, "pause / cont are Unix only")
+    def test_pause_not_in_timeout(self):
+        # RDD_025: a pause longer than the timeout does not fail the run (before: "timeout after 2s" mid-pause).
+        a = self.submit(spec(sim(1.0), timeout="2s"))
+        self.wait_state(a, "running")
+        time.sleep(0.3)
+        self.jm_ok("pause", a)
+        time.sleep(2.5)
+        self.assertEqual(self.state(a), "running")
+        self.jm_ok("cont", a)
+        self.assertEqual(self.wait_ended(a), "done")
+
     def test_clean(self):
         a = self.submit(spec(sim(0.1)))
         self.wait_ended(a)
@@ -532,6 +544,24 @@ class TestCrashes(JmTestCase):
         self.assertEqual(runs[1][4], "resume")
         self.assertIn("sim: resumed at", self.jobfile(a, "log"))
         self.assertIn("cut off", self.jobfile(a, "events"))
+
+    @unittest.skipIf(IS_WIN, "pause / cont are Unix only")
+    def test_paused_at_cut_off_is_held(self):
+        # RDD_025: paused, then a reboot (wrapper killed, daemon down): held, not resumed; release resumes it.
+        counter = os.path.join(self.work, "count")
+        a = self.submit(spec(sim(1.5, resumable=counter)))
+        self.wait_state(a, "running")
+        time.sleep(0.4)
+        self.jm_ok("pause", a)
+        self.kill_wrapper(a)
+        self.start_daemon()
+        self.assertEqual(self.wait_state(a, "held"), "held")
+        self.assertIn("paused", self.reason(a))
+        self.jm_ok("release", a)
+        self.assertEqual(self.wait_ended(a), "done")
+        runs = self.runs(a)
+        self.assertEqual([r[3] for r in runs], ["cut", "0"])
+        self.assertEqual(runs[1][4], "resume")
 
     def test_on_boot_hold_and_fail(self):
         a = self.submit(spec(sim(20), on_boot="hold"))
