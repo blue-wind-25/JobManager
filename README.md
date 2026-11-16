@@ -20,7 +20,7 @@ There is no network port and no web UI: remote use is `ssh -t host jm ...`, with
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/blue-wind-25/JobManager/v1.9.0/jm.py -o ~/bin/jm && chmod +x ~/bin/jm
+curl -fsSL https://raw.githubusercontent.com/blue-wind-25/JobManager/v1.10.0/jm.py -o ~/bin/jm && chmod +x ~/bin/jm
 jm daemon start                 # or: jm daemon install systemd | launchd | windows
 ```
 
@@ -96,6 +96,7 @@ Every spec and config key is listed in [docs/GUIDE.md](docs/GUIDE.md) sec 11; th
 | `jm move ID --top\|--bottom\|--up N\|--down N\|--before ID2\|--after ID2`, `jm move --by-priority`, `jm swap A B` | reorder |
 | `jm hold ID` / `jm release ID` `[--chain]` | park / unpark (also a stopped job); `--chain`: also every job waiting for it through `after` |
 | `jm skip ID` / `jm deps ID [--align \| --tabs]` | mark done without running (not a running job) / the jobs waiting for ID, as a tree |
+| `jm needs ID [--all] [--align \| --tabs]` | the jobs ID waits for, upward, as a tree: only what is still in the way (failed / cancelled shown), `--all` every one (1.10) |
 | `jm stop ID` / `jm restart ID` / `jm requeue ID [--top\|--end] [--fresh] [--spec-edit k=v]` / `jm cancel ID` | life cycle (`--children` for groups) |
 | `jm spec ID` | print the spec as stored, with any `set` / `edit` changes, env values included (secrets masked) |
 | `jm edit ID` / `jm set ID k=v k+=v k=` | change a spec that is not running |

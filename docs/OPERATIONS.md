@@ -108,6 +108,8 @@ or by "never fits" is not a head and does not block anyone.
   forever. **(1.5)** they print a warning for both (`after: no such job X`, `after: cycle A -> B -> A`) and still
   apply the change (exit 0).
 - **(1.5)** `jm deps X` lists what waits for X (a tree, every state); `jm status X` has a `needed by:` line.
+- **(1.10)** `jm needs X` is the other direction: what X still waits for, upward (met jobs left out; failed and
+  cancelled ones shown, "never met" under `after_ok = yes`); `--all` the whole chain.
 - Parent / child is different: a **failed or cancelled parent cancels** its unfinished children (also held and
   stopped ones), and a child that fails for good cancels its waiting siblings unless the group has
   `continue_on_fail = yes` (GUIDE sec 4).
@@ -182,6 +184,7 @@ that had run), `restart` (`jm restart`). `JM_RUN` counts runs from 1.
 | What runs, what waits and why | `jm list` (4th column is the reason); `jm list --order` for start order |
 | One job: runs, exit codes, progress, events | `jm status ID` |
 | What waits for it | `jm deps ID` **(1.5)** |
+| What it still waits for (why it does not start) | `jm needs ID` **(1.10)**, the whole chain `--all` |
 | When each job should end | `jm list --order --eta` (shortcuts `jl`, `je`), `jm status ID` line `eta:` **(1.6)** (RDD_019: from `estimate`, the `class` history and the progress rate; resources ignored, shown only) |
 | Its spec as stored | `jm spec ID` |
 | Its captured output / its own log / its summary | `jm log ID -n 50`, `jm applog ID -n 50`, `jm report ID` |

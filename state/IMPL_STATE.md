@@ -23,6 +23,7 @@ Last update: 2026-11-15.
 | `jm list --order`, `--fields`, aligned columns; `jl` in run order | done (1.4.0) | RDD_017; `test_list_order_fields_align` |
 | `jm hold` of a stopped job, `hold / release --chain`, `jm skip`, `jm deps`, `after` warnings, fuller `jm status` | done (1.5.0) | RDD_018; `test_hold_stopped_and_chain`, `test_skip`, `test_deps_status_and_after_warnings`, `test_skip_and_hold_stopped` |
 | `monitor` (spec + config), `config_monitor`, `JM_MONITOR`; `jm status` lists them | done (1.9.0) | RDD_023; `TestMonitor` (5 tests) |
+| `jm needs ID [--all]`: upward `after` tree, met jobs pruned, failed / cancelled / missing shown | done (1.10.0) | RDD_024; `test_needs_prunes_done_shows_blockers`, `test_deps_status_and_after_warnings` |
 | docs/OPERATIONS.md: every command per state, admission, `after` rules, run steps, recipes | done (docs only; 1.5.0 marked) | rules checked against 1.4.0 code and a scratch daemon (`after` on cancelled / stopped / missing jobs) |
 | Dogfooding on the CM5 (JM_DESIGN.md sec 15.2) | in progress, 1.4.0 (HowToTrainYourPetAI RDD_646-653) | 1.0.0 showed RDD_014; passed: submit, run, reboot and a physical power cut mid-run (resumed by itself, systemd user unit + linger, GUIDE sec 9), logs and `report` from the phone, `after` chains of 10+ jobs with hold / stop / `jm set after=` re-pointing (2026-10-28/29); left: results fetched |
 

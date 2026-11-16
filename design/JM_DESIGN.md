@@ -253,6 +253,8 @@ jm hold ID / jm release ID [--chain]           park / unpark (a running job: hol
                                                through `after` (RDD_018)
 jm skip ID                                     mark a job that is not running done without running it (RDD_018)
 jm deps ID [--align|--tabs]                    the jobs waiting for ID through `after`, as a tree (RDD_018)
+jm needs ID [--all] [--align|--tabs]           the jobs ID waits for, upward: only what is still in the way, --all
+                                               every one (RDD_024)
 jm stop ID                                     stop now -> stopped (stays listed, never auto-resumed)
 jm restart ID                                  stop, then start again in place (JM_HOW=restart; resume cmd)
 jm requeue ID [--top | --end] [--fresh]        stop if running, back to the queue (--fresh: start, not resume)

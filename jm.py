@@ -42,7 +42,7 @@ import threading
 import time
 import traceback
 
-VERSION = "1.9.0"
+VERSION = "1.10.0"
 IS_WIN = os.name == "nt"
 IS_LINUX = sys.platform.startswith("linux")
 JM_PATH = os.path.abspath(__file__)
@@ -3111,6 +3111,44 @@ def cmd_deps(store, a):
     return EXIT_OK
 
 
+def after_met(child, d):
+    """RDD_024: whether `after` job d (None: no such job) no longer holds `child` back - the rule deps_state applies."""
+    if d is None:
+        return False
+    return d.state == DONE or (d.state in TERMINAL and not child.spec["after_ok"])
+
+
+def cmd_needs(store, a):
+    """RDD_024: the jobs ID waits for through `after`, upward, as a tree - the other direction of `jm deps`. By default
+    only what is still in the way (an `after` job that does not meet the rule yet, then its own); --all: every one."""
+    store.init()
+    ctx = Ctx(store)
+    root = ctx.need(a.id)
+    lines, seen = [], set([root.id])
+
+    def walk(j, depth):
+        for dep in j.spec["after"]:
+            d = ctx.job(dep)
+            if not a.all and after_met(j, d):
+                continue
+            if dep in seen:
+                continue
+            seen.add(dep)
+            if d is None:
+                lines.append(["  " * depth + dep, "missing", "", "no such job: %s waits until one is submitted" % j.id,
+                              "", ""])
+                continue
+            row = list_row(d, depth)
+            if d.state in (FAILED, CANCELLED) and j.spec["after_ok"]:
+                row[3] = "never met: %s has after_ok = yes" % j.id
+            lines.append(row)
+            walk(d, depth + 1)
+    walk(root, 0)
+    align = a.align if a.align is not None else sys.stdout.isatty()
+    print_rows(lines, ("id", "state", "reason"), align)
+    return EXIT_OK
+
+
 def after_warnings(ctx, jid, spec):
     """RDD_018: an `after` that names no job, or that leads back to the job itself, waits forever; say so."""
     msgs = []
@@ -3926,6 +3964,13 @@ def build_parser():
     g = x.add_mutually_exclusive_group()
     g.add_argument("--align", dest="align", action="store_true", default=None)
     g.add_argument("--tabs", dest="align", action="store_false")
+    x = sub.add_parser("needs", help="the jobs ID waits for through `after`, upward, as a tree: by default only "
+                       "what is still in the way, --all every one")
+    x.add_argument("id", help="job id")
+    x.add_argument("--all", action="store_true", help="every `after` job, done ones included")
+    g = x.add_mutually_exclusive_group()
+    g.add_argument("--align", dest="align", action="store_true", default=None)
+    g.add_argument("--tabs", dest="align", action="store_false")
     for name, h in (("stop", "stop now: stays listed as stopped, never restarts by itself"),
                     ("cancel", "stop if running and remove from the queue")):
         x = sub.add_parser(name, help=h)
@@ -3984,7 +4029,7 @@ COMMANDS = {
     "report": cmd_report,
     "wait": cmd_wait, "move": cmd_move, "swap": cmd_swap, "hold": cmd_hold, "release": cmd_release,
     "stop": cmd_stop, "cancel": cmd_cancel, "restart": cmd_restart, "requeue": cmd_requeue, "set": cmd_set,
-    "edit": cmd_edit, "spec": cmd_spec, "skip": cmd_skip, "deps": cmd_deps, "config": cmd_config, "clean": cmd_clean, "artifacts": cmd_artifacts,
+    "edit": cmd_edit, "spec": cmd_spec, "skip": cmd_skip, "deps": cmd_deps, "needs": cmd_needs, "config": cmd_config, "clean": cmd_clean, "artifacts": cmd_artifacts,
     "daemon": cmd_daemon, "pause": lambda s, a: cmd_pause(s, a), "cont": lambda s, a: cmd_pause(s, a, True),
 }
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.10.0 - 2026-11-16
+
+- `jm needs ID` (RDD_024): what a job waits for through `after`, upward, as a tree - the other direction of `jm deps`.
+  By default only what is still in the way (jobs not meeting the `after` rule yet, then their own); failed and
+  cancelled jobs stay shown ("never met" under `after_ok = yes`), a missing `after` job prints as `missing`. `--all`
+  prints the whole chain with every state.
+
 ## 1.9.0 - 2026-11-15
 
 - `monitor` (RDD_023): commands that run beside a job's `start` / `resume` and stop when it ends: TERM to the

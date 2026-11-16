@@ -44,6 +44,7 @@ running they print `no running job; give an ID` and fail.
 | Queue one command | `jm submit --name x --cpu 1 --ram 200 -- sleep 600` |
 | Read its spec as stored | `jm spec ID` |
 | Who waits for this job? | `jm deps ID` |
+| What is this job still waiting for? | `jm needs ID` (whole chain: `--all`) |
 | Do not start this job yet | `jm hold ID` (`--chain`: its dependents too) |
 | Let it start again | `jm release ID` (`--chain`: its dependents too) |
 | Stop it now, keep it listed | `jm stop ID` |

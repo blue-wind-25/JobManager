@@ -179,6 +179,27 @@ class TestQueueOps(JmTestCase):
         rc, _, _ = self.jm("spec", "nosuchjob")
         self.assertEqual(rc, 3)
 
+    def test_needs_prunes_done_shows_blockers(self):
+        # RDD_024: x <- y <- z; w is cancelled; z also waits on w and on a job that does not exist.
+        x = self.submit("start = %s\n" % sim())
+        y = self.submit("after = %s\nstart = %s\n" % (x, sim()))
+        w = self.submit("start = %s\n" % sim())
+        z = self.submit("after = %s\nafter = %s\nstart = %s\n" % (y, w, sim()))
+        self.assertEqual(self.jm("set", z, "after+=nosuch")[0], 0)  # submit refuses it, set only warns
+        self.jm_ok("cancel", w)
+        self.jm_ok("skip", x)  # done: met, so its branch is pruned
+        rows = [r.split("\t") for r in self.jm_ok("needs", z, "--tabs").splitlines()]
+        self.assertEqual([r[0] for r in rows], [y, w, "nosuch"])
+        self.assertEqual(rows[1][1], "cancelled")
+        self.assertIn("never met", rows[1][2])
+        self.assertEqual(rows[2][1], "missing")
+        rows = [r.split("\t") for r in self.jm_ok("needs", z, "--all", "--tabs").splitlines()]
+        self.assertEqual([r[0] for r in rows], [y, "  " + x, w, "nosuch"])
+        self.assertEqual(rows[1][1], "done")
+        self.assertEqual(self.jm_ok("needs", y).strip(), "")  # its only parent is done: nothing in the way
+        rc, _, _ = self.jm("needs", "nosuchjob")
+        self.assertEqual(rc, 3)
+
     def test_deps_status_and_after_warnings(self):
         a = self.submit("start = %s\ndone_check = test -f nothing\npre = echo pre\n" % sim())
         b = self.submit("after = %s\nstart = %s\n" % (a, sim()))
@@ -193,6 +214,10 @@ class TestQueueOps(JmTestCase):
         self.assertIn("done_check: test -f nothing", st)
         self.assertIn("pre: echo pre", st)
         self.assertNotIn("needed by", self.jm_ok("status", d))
+        # RDD_024: needs = the other direction; each job once, every `after` job is still in the way here.
+        rows = [r.split("\t") for r in self.jm_ok("needs", d, "--tabs").splitlines()]
+        self.assertEqual([r[0] for r in rows], [a, c, "  " + b])
+        self.assertEqual(self.jm_ok("needs", a).strip(), "")
         # set / edit warn about an `after` that waits forever, and still apply it.
         rc, _, err = self.jm("set", b, "after=nosuch")
         self.assertEqual(rc, 0)
