@@ -115,8 +115,9 @@ after       = gso_b_render               # dependencies (ids); repeated key = se
 after_ok    = yes                        # yes: only after they succeed (default); no: after they end in any state
 priority    = 0                          # only breaks ties when moving jobs with `jm move --by-priority`
 retries     = 1                          # automatic restarts after a failure (default 0)
-timeout     =                            # wall-clock limit, e.g. 12h (default none)
+timeout     =                            # wall-clock limit, e.g. 12h (default none); paused time left out (RDD_025)
 on_boot     = resume                     # resume (default) | hold | fail: a run cut off by a reboot / crash
+                                         # (a run cut off while paused is always held, RDD_025)
 drain       = no                         # yes: as soon as this job heads the queue, admit nothing else
 
 pre         = data-rw.sh                 # run before every (re)start; failure = the start fails
@@ -206,7 +207,8 @@ queued ──► waiting ──► running ──► done
 **Reboot / daemon crash** **[decided: auto-resume]**: on start the daemon checks every `running` / `stopping`
 job. Wrapper alive (pid + start time + token) -> it adopts it. Dead with an `exit` file -> done / failed as recorded.
 Dead with no `exit` file -> the run was cut off: `on_boot = resume` (default) puts it back at the top of the queue
-and starts it with its `resume` command (`JM_HOW=resume`); `hold` parks it; `fail` marks it failed. Jobs must be
+and starts it with its `resume` command (`JM_HOW=resume`); `hold` parks it; `fail` marks it failed. A run cut off
+while paused (`jm pause`) is held whatever `on_boot` says, and `jm release` resumes it (RDD_025). Jobs must be
 resumable for this (snapshots, skip-if-done steps); `done_check` makes a finished-but-unrecorded job count as done.
 
 ## 8. Sub-jobs

@@ -67,5 +67,6 @@ running they print `no running job; give an ID` and fail.
 - `jm set` and `jm edit` refuse a running job.
 - A `monitor` must `$JM_JM stop $JM_ID` to stop the job: its own exit status is ignored.
 - A clean poweroff counts as a reboot: running jobs resume at boot, at the top of the queue (`on_boot = resume`).
+  A job paused with `jm pause` comes back held instead; `jm release` resumes it (1.10).
 
 Every command in every state: [OPERATIONS.md](OPERATIONS.md). Every spec and config key: [GUIDE.md](GUIDE.md) sec 11.

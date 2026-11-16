@@ -38,6 +38,7 @@ A job has one command it must have, `start`, and an optional `resume`. Every run
 | first run, `jm requeue --fresh` | `start` | `start` |
 | automatic retry after a failure (`retries`) | `resume` | `resume`, **or `start` when there is no `resume`** |
 | a run cut off by a reboot / crash (`on_boot = resume`) | `resume` | `resume`, or `start` |
+| a run cut off while paused: held, then `jm release` (1.10, RDD_025) | `resume` | `resume`, or `start` |
 | `jm restart`, `jm requeue` (without `--fresh`) | `restart` / `resume` | `resume`, or `start` |
 
 So a job without `resume` simply runs `start` again; when it needs to, it can still tell a fresh start from a
@@ -71,7 +72,8 @@ and `JM_PID` (given to a `stop` command) is the program itself. A template is in
 ## 3. Retries and timeouts
 
 - `retries = N`: after a failure the job goes back to the queue (same place) up to N times, as a `resume` run.
-- `timeout = 12h`: a run that takes longer is stopped and counts as a failure (retries apply).
+- `timeout = 12h`: a run that takes longer is stopped and counts as a failure (retries apply). Time spent paused
+  (`jm pause` to `jm cont`) does not count (1.10, RDD_025).
 - Running time is measured on the monotonic clock (on Linux also across a daemon restart), so the date being set
   after boot - NTP on a Pi without RTC battery - neither fires a `timeout` nor the drain guard early (RDD_013).
 - `jm hold` on a running job: the job is held instead of retried if it fails.
@@ -116,6 +118,12 @@ when Windows refuses that - as it does for console programs - jm kills the proce
 checkpoint, release a lock) needs a `stop` command, e.g. one that creates a file the job watches for, or calls
 the program's own shutdown command. `jm pause` / `jm cont` do not exist on Windows.
 
+**Pause** (Unix): `jm pause ID` freezes a running job's command (SIGSTOP) and `jm cont ID` lets it go on; the job
+stays `running` and keeps its cpu, ram and tokens (a paused CUDA program keeps its GPU memory). Paused time is not
+part of `timeout`. A reboot or crash kills the paused process; since 1.10 the job then comes back **held**, not
+resumed, so it waits until `jm release` resumes it from its checkpoint (RDD_025). To free the resources instead,
+`jm stop` it and `jm requeue` it later.
+
 ## 6. Machine hooks: on_first_start and on_idle
 
 For a machine that must prepare something before work and undo it after - e.g. a read-only root file system
@@ -155,8 +163,8 @@ script as `on_first_start`:
 home_rw        = /usr/local/bin/data-rw.sh   # a jm command that must write finds its home read-only: run this first
 ```
 
-- Commands that only read (`list`, `status`, `log`, `applog`, `wait`, `free`, `artifacts`, `config`,
-  `daemon status`) work on the read-only home; `submit`, every queue change, `config k=v`, `daemon start` and
+- Commands that only read (`list`, `status`, `log`, `applog`, `wait`, `free`, `artifacts`, `config`, `spec`,
+  `deps`, `needs`, `daemon status`) work on the read-only home; `submit`, every queue change, `config k=v`, `daemon start` and
   `daemon stop` run `home_rw` first (and fail with its output if the home stays read-only).
 - The daemon writes `machine idle` before on_idle, then waits without writing until a command has made the home
   writable again; it is not restarted. A daemon started after a boot, with the mount still read-only, runs
@@ -305,7 +313,7 @@ report = sh tools/status.sh train ${JM_LINES:-8}      # e.g. the run's table and
 ## 9. Starting the daemon at boot
 
 Jobs survive a reboot only as far as the daemon comes back: a cut-off job is resumed (`on_boot = resume`) when the
-daemon next starts, not before. Three ways to start it, from most to least robust:
+daemon next starts, not before; one that was paused comes back held (RDD_025). Three ways to start it, from most to least robust:
 
 | Way | Starts at boot without a login | Restarts a daemon that died | Needs |
 |---|---|---|---|
@@ -395,8 +403,8 @@ Unknown keys are an error. A repeated key adds to a list. Durations: `90s`, `30m
 | `after_ok` | yes | yes: they must succeed; no: any end will do |
 | `priority` | 0 | Higher goes first, only in `jm move --by-priority`; the scheduler ignores it |
 | `retries` | 0 | Automatic restarts after a failure |
-| `timeout` | none | Wall-clock limit per run; counts as a failure |
-| `on_boot` | resume | After a reboot or crash: `resume`, `hold` or `fail` |
+| `timeout` | none | Wall-clock limit per run, paused time left out; counts as a failure |
+| `on_boot` | resume | After a reboot or crash: `resume`, `hold` or `fail` (a paused run always comes back held) |
 | `drain` | no | yes: once at the head of the queue, admit nothing else |
 | `children` | none | Child spec files: this job is a group (sec 4) |
 | `parallel` | 0 | Group: children at a time |
