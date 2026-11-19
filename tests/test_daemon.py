@@ -119,7 +119,10 @@ class TestAdmission(JmTestCase):
         short = self.submit(spec(sim(0.2), cpu=1, estimate="1s", name="short"))
         self.assertEqual(self.wait_ended(short), "done")  # ends before the head could start: backfilled
         self.assertEqual(self.state(long_), "waiting")
-        self.assertIn("backfill would delay head %s" % h, self.reason(long_))
+        # While `short` ran the long job did not fit at all ("cpu 1 > free 0"); the next pass gives the real reason.
+        want = "backfill would delay head %s" % h
+        self.until(lambda: want in self.reason(long_), "%s: %s (is: %s)" % (long_, want, self.reason(long_)))
+        self.assertEqual(self.state(long_), "waiting")
         self.assertIn("expected to start", self.reason(h))
         self.jm_ok("cancel", r)
         self.assertEqual(self.wait_ended(h), "done")
