@@ -426,7 +426,8 @@ Unknown keys are an error. A repeated key adds to a list. Durations: `90s`, `30m
 | `ram_reserve` | 0 | MB never handed out |
 | `tokens` | none | Named resources and their counts, e.g. `gpu:1` |
 | `backfill` | yes | Later jobs may start while the head does not fit |
-| `drain_after` | 30m | Head job waiting this long: stop backfilling |
+| `drain_after` | 30m | Head job waiting this long: stop backfilling (not while `backfill_estimates` plans the head) |
+| `backfill_estimates` | yes | Every running job has an estimate: backfill only jobs that end before the head's expected start or leave room for it (RDD_026) |
 | `poll` | 5s | Scheduler pass interval |
 | `progress_every` | 60s | How often the `progress` command runs |
 | `keep` | 7d | How long finished jobs stay listed; `jm clean --older` default |

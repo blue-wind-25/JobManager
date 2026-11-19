@@ -82,6 +82,9 @@ The daemon wakes on every command and every `poll` (5 s). Each pass:
 4. **Backfill**: a job that does not fit only because of resources becomes the *head*; later rows can still start
    if they fit, unless the head has `drain = yes`, the head has waited longer than `drain_after` (30 min), or the
    config says `backfill = no`. Then nothing below the head starts until it does ("head X waits").
+   Since 1.11.0, when every running job has an estimate (`estimate` or `class`), the head gets an expected start
+   ("expected to start ~..."), and a later job starts only if it ends before then or leaves room for the head;
+   otherwise "backfill would delay head X". `drain_after` is not used then (`backfill_estimates = no` turns it off).
 5. On an idle machine the first startable job waits for `on_first_start` to succeed first.
 
 So queue order decides who gets resources first; `after` decides who may start at all. A job blocked by `after`

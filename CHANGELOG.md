@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.11.0 - 2026-11-20
+
+- Backfill with run-time estimates (EASY, design sec 12.1, RDD_026): when every running job has an estimate (spec
+  `estimate` or its `class` history), the waiting head gets an expected start time ("expected to start ~MM-DD HH:MM
+  (estimates)"), and a later job may jump ahead only if it ends before then or leaves room for the head at that time
+  ("backfill would delay head X" otherwise). `drain_after` then does not apply. Any running job without an estimate:
+  the old rule. New config key `backfill_estimates` (default yes; `no` = the old rule).
+- A config using `backfill_estimates` needs jm 1.11.0 on that machine (older versions refuse the unknown key).
+
 ## 1.10.0 - 2026-11-16
 
 - `jm needs ID` (RDD_024): what a job waits for through `after`, upward, as a tree - the other direction of `jm deps`.

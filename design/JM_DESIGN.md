@@ -334,6 +334,8 @@ Rule (EASY backfill), replacing step 4 of section 6 when every running job has a
 3. A job with an unknown estimate, or any running job with an unknown estimate, falls back to the v1 rule
    (backfill until `drain_after`, then drain).
 `jm list` shows the head's shadow time ("head expected to start ~14:20") so the decision is visible.
+Built in 1.11.0 (RDD_026): the head's reason carries the time; `disk` stays outside the walk; config
+`backfill_estimates = no` restores the v1 rule.
 
 ### 12.2 Progress and ETA (v2)
 

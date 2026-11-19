@@ -1,6 +1,6 @@
 # Implementation state
 
-Last update: 2026-11-15.
+Last update: 2026-11-20.
 
 | Part | Status | Notes |
 |---|---|---|
@@ -13,7 +13,7 @@ Last update: 2026-11-15.
 | jm tests and CI - sec 12.5 | done; full CI matrix green (PR #2) | see below |
 | claude-guards - design/CLAUDE_GUARDS.md sec 2-5, 7 | done (in `guards/`, installed in `.claude/`) | RDD_009 |
 | jm v2 - sec 12.2 progress parsing and ETA, estimates (`estimate`, `class`, `STATE/history`), `jm list --eta` | done (1.6.0) | RDD_019; `TestProgress`, `test_eta`, `test_history_and_running_eta` |
-| jm v2 - sec 12.1 EASY backfill with estimates | not started | the estimates of RDD_019 are its input |
+| jm v2 - sec 12.1 EASY backfill with estimates, config `backfill_estimates` | done (1.11.0) | RDD_026; `test_easy_backfill_*` (4); vermin 1.9.2: 3.6 floor |
 | jm v3 - sec 12.3 several users, sec 12.4 several machines (`jm free` already exists) | not started | |
 | claude-guards in its own repository; adoption in HowToTrainYourPetAI (CLAUDE_GUARDS.md sec 6) | not started | `guards/` moves out as is |
 | Release 1.0.0 (`VERSION`, CHANGELOG; tag `v1.0.0` on the release PR's merge) | done | |

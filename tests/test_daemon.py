@@ -109,6 +109,55 @@ class TestAdmission(JmTestCase):
         self.assertEqual(self.wait_ended(b), "done")
         self.assertLessEqual(self.runs(h)[0][1], self.runs(b)[0][1])
 
+    # RDD_026: EASY backfill. The running blocker has an estimate, so the head's start time is known; every later
+    # job is judged against it. The blockers run until the test cancels them (no race with slow start-up).
+    def test_easy_backfill_protects_head(self):
+        r = self.submit(spec(sim(60), cpu=1, estimate="30s"))
+        self.wait_state(r, "running")
+        h = self.submit(spec(sim(0.2), cpu=2, name="head"))
+        long_ = self.submit(spec(sim(0.2), cpu=1, estimate="10m", name="long"))
+        short = self.submit(spec(sim(0.2), cpu=1, estimate="1s", name="short"))
+        self.assertEqual(self.wait_ended(short), "done")  # ends before the head could start: backfilled
+        self.assertEqual(self.state(long_), "waiting")
+        self.assertIn("backfill would delay head %s" % h, self.reason(long_))
+        self.assertIn("expected to start", self.reason(h))
+        self.jm_ok("cancel", r)
+        self.assertEqual(self.wait_ended(h), "done")
+        self.assertEqual(self.wait_ended(long_), "done")
+        self.assertLessEqual(self.runs(h)[0][1], self.runs(long_)[0][1])
+
+    def test_easy_backfill_spare(self):
+        # The head needs the gpu, not the second cpu: a long job may take that cpu, the head still fits beside it.
+        r = self.submit(spec(sim(60), cpu=1, tokens="gpu:1", estimate="30s"))
+        self.wait_state(r, "running")
+        h = self.submit(spec(sim(0.2), cpu=1, tokens="gpu:1", name="head"))
+        long_ = self.submit(spec(sim(0.2), cpu=1, estimate="10m", name="long"))
+        self.assertEqual(self.wait_ended(long_), "done")
+        self.assertEqual(self.state(h), "waiting")
+        self.jm_ok("cancel", r)
+        self.assertEqual(self.wait_ended(h), "done")
+
+    def test_easy_backfill_off(self):
+        self.jm_ok("config", "backfill_estimates=no")
+        r = self.submit(spec(sim(60), cpu=1, estimate="30s"))
+        self.wait_state(r, "running")
+        h = self.submit(spec(sim(0.2), cpu=2, name="head"))
+        long_ = self.submit(spec(sim(0.2), cpu=1, estimate="10m", name="long"))
+        self.assertEqual(self.wait_ended(long_), "done")  # the v1 rule: anything that fits, until drain_after
+        self.assertNotIn("expected to start", self.reason(h))
+        self.jm_ok("cancel", r)
+        self.assertEqual(self.wait_ended(h), "done")
+
+    def test_easy_backfill_unknown_estimate(self):
+        r = self.submit(spec(sim(60), cpu=1))  # no estimate, no class: the head's start time is unknown
+        self.wait_state(r, "running")
+        h = self.submit(spec(sim(0.2), cpu=2, name="head"))
+        long_ = self.submit(spec(sim(0.2), cpu=1, estimate="10m", name="long"))
+        self.assertEqual(self.wait_ended(long_), "done")
+        self.assertNotIn("expected to start", self.reason(h))
+        self.jm_ok("cancel", r)
+        self.assertEqual(self.wait_ended(h), "done")
+
     def test_fifo(self):
         self.jm_ok("config", "backfill=no")
         r = self.submit(spec(sim(1.5), cpu=1))

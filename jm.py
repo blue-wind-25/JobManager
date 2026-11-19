@@ -42,7 +42,7 @@ import threading
 import time
 import traceback
 
-VERSION = "1.10.0"
+VERSION = "1.11.0"
 IS_WIN = os.name == "nt"
 IS_LINUX = sys.platform.startswith("linux")
 JM_PATH = os.path.abspath(__file__)
@@ -653,6 +653,7 @@ CONFIG_KEYS = [
     ("on_first_start", "cmd", None), ("on_idle", "cmd", None), ("hook_timeout", "dur", 120.0),
     ("idle_after", "dur", 60.0), ("log_max", "num", 100.0), ("home_rw", "cmd", None),
     ("monitor", "list", None),  # RDD_023
+    ("backfill_estimates", "bool", True),  # RDD_026
 ]
 LIST_KINDS = ("list", "env", "tokens")
 CMD_KEYS_SPEC = [k for k, kind, _ in SPEC_KEYS if kind == "cmd"]
@@ -811,6 +812,7 @@ DEFAULT_CONFIG = """# jm machine config (design/JM_DESIGN.md sec 6). `key = valu
 # tokens       = gpu:1       # named exclusive resources (name:count)
 # backfill     = yes
 # drain_after  = 30m
+# backfill_estimates = yes   # with an estimate for every running job: backfill only what keeps the head on time
 # poll         = 5s
 # env          = DATA=/mnt/data   # passed to every job
 # on_first_start = data-rw.sh    # any command (example name): the machine goes from idle to busy
@@ -1566,6 +1568,47 @@ def fits(ctx, use, j, store):
     return None
 
 
+def easy_plan(ctx, use, head, now):
+    """RDD_026 (design sec 12.1, EASY backfill): (shadow seconds from now, spare) or None. The shadow time is when
+    the head would first fit, walking the running jobs by expected end and freeing their cpu / ram / tokens one by
+    one; `spare` is what is still free beside the head at that moment. None (the v1 rule applies) when a running
+    job has no estimate, or when freeing every running job would not make the head fit (disk, or a group parent)."""
+    cfg = ctx.cfg
+    ends = []
+    for jid in ctx.queue:
+        j = ctx.job(jid)
+        if j is None or j.state not in (RUNNING, STOPPING) or not os.path.exists(j.path("pid")):
+            continue
+        r = remaining_seconds(ctx, j, now)
+        if r is None:
+            return None
+        ends.append((r, j.spec))
+    ends.sort(key=lambda e: e[0])
+    free = {"cpu": cfg["cpus"] - use.cpu, "ram": cfg["ram"] - cfg["ram_reserve"] - use.ram,
+            "tokens": dict((n, cfg["token_counts"].get(n, 0) - use.tokens.get(n, 0)) for n in cfg["token_counts"])}
+    if take(free, head.spec) is not None:
+        return None  # it already fits by cpu / ram / tokens: something else (disk) holds it, which no end frees
+    for r, s in ends:
+        free["cpu"] += s["cpu"]
+        free["ram"] += s["ram"]
+        for name, n in s["tokens"]:
+            free["tokens"][name] = free["tokens"].get(name, 0) + n
+        spare = take(free, head.spec)
+        if spare is not None:
+            return r, spare
+    return None
+
+
+def take(free, s):
+    """`free` minus what spec `s` asks for (cpu, ram, tokens), or None when it does not fit."""
+    left = {"cpu": free["cpu"] - s["cpu"], "ram": free["ram"] - s["ram"], "tokens": dict(free["tokens"])}
+    for name, n in s["tokens"]:
+        left["tokens"][name] = left["tokens"].get(name, 0) - n
+    if left["cpu"] < -1e-9 or left["ram"] < -1e-9 or any(v < 0 for v in left["tokens"].values()):
+        return None
+    return left
+
+
 def start_job(ctx, j, use, daemon):
     store = ctx.store
     if not daemon.busy:
@@ -1665,6 +1708,8 @@ def daemon_pass(store, daemon):
         daemon.set_machine(store, use.running > 0)
     head = None
     blocked = None
+    plan = None  # RDD_026: [shadow seconds, spare] while the head is protected by its estimate
+    now = time.time()
     for jid in list(ctx.queue):
         j = ctx.job(jid)
         if j is None or j.state not in PENDING:
@@ -1695,6 +1740,16 @@ def daemon_pass(store, daemon):
             ctx.check_parent(j)
             continue
         why = "%s: head %s waits" % (blocked, head.id) if blocked else fits(ctx, use, j, store)
+        if why is None and plan is not None:
+            # RDD_026: a later job starts now only if it ends before the head's shadow time, or if the head
+            # still fits at that time beside it (then it uses part of the spare).
+            est, _ = job_estimate(ctx, j)
+            if est is None or est > plan[0]:
+                left = take(plan[1], s)
+                if left is None:
+                    why = "backfill would delay head %s (expected to start %s)" % (head.id, fmt_when(now + plan[0]))
+                else:
+                    plan[1] = left
         if why is None and not daemon.busy and cfg["on_first_start"]:
             # The machine is idle: run on_first_start (after this pass, outside the lock) before any job starts.
             daemon.want_hook = "on_first_start"
@@ -1713,8 +1768,13 @@ def daemon_pass(store, daemon):
                 blocked = "fifo (backfill = no)"
             elif s["drain"]:
                 blocked = "drain (head has drain = yes)"
-            elif waited > cfg["drain_after"]:
+            elif cfg["backfill_estimates"]:
+                p = easy_plan(ctx, use, j, now)
+                plan = None if p is None else [p[0], p[1]]
+            if blocked is None and plan is None and waited > cfg["drain_after"]:
                 blocked = "drain (head waited %s > drain_after)" % fmt_duration(waited)
+            if plan is not None:
+                why = "%s; expected to start %s (estimates)" % (why, fmt_when(now + plan[0]))
             if blocked:
                 why = "%s; %s" % (why, blocked)
         ctx.set_state(j, WAITING, why)
