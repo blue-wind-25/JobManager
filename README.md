@@ -33,7 +33,7 @@ The state dir is `~/.jm`; set `JM_HOME` or `--home DIR` for another one (e.g. a 
 
 ```sh
 jm config cpus=4 ram=4000 ram_reserve=500 tokens=gpu:1
-jm submit --name sleepy --cpu 1 --ram 200 -- sleep 600        # inline
+jm submit --name sleepy --cpu 1 --ram 200 -- sleep 600         # inline
 jm submit examples/train.jm                                    # a spec file
 ssh host jm submit - < examples/train.jm                       # a spec on stdin
 jm list                                                        # id, state, name, reason, progress (aligned on a terminal,
