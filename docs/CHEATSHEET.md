@@ -56,6 +56,8 @@ running they print `no running job; give an ID` and fail.
 | Wait for it in a script | `jm wait ID` (exit code = the job's) |
 | Free cores, RAM and tokens | `jm free` |
 | The machine's limits | `jm config` |
+| Why does a job that fits not start? | `jm list`: "backfill would delay head X" = it would push back the waiting head (1.11) |
+| Backfill the old way (no estimates) | `jm config backfill_estimates=no` |
 | Guard every job with a script | `jm config monitor+='sh /abs/guard.sh $JM_ID'` (restart the daemon after an upgrade) |
 | A job on another machine | `jm remote list`, `jm remote log -f ID` |
 
@@ -68,5 +70,7 @@ running they print `no running job; give an ID` and fail.
 - A `monitor` must `$JM_JM stop $JM_ID` to stop the job: its own exit status is ignored.
 - A clean poweroff counts as a reboot: running jobs resume at boot, at the top of the queue (`on_boot = resume`).
   A job paused with `jm pause` comes back held instead; `jm release` resumes it (1.10).
+- Backfill trusts `estimate` and the `class` history (1.11): a wrong estimate lets a long job slip in front of the
+  head, or keeps a short one waiting. Fix it with `jm set ID estimate=...` on the waiting job.
 
 Every command in every state: [OPERATIONS.md](OPERATIONS.md). Every spec and config key: [GUIDE.md](GUIDE.md) sec 11.
